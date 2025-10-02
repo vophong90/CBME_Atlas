@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
+import AuthButton from './AuthButton'
 
 const links = [
   { href: '/', label: 'Trang chủ' },
@@ -23,10 +24,13 @@ export default function TopNav() {
         </div>
         <div className="flex items-center gap-1">
           {links.map(l => (
-            <Link key={l.href} href={l.href} className={`px-3 py-1.5 rounded-lg text-sm hover:bg-slate-50 ${pathname===l.href ? 'bg-slate-100' : ''}`}>
+            <Link key={l.href} href={l.href}
+              className={`px-3 py-1.5 rounded-lg text-sm hover:bg-slate-50 ${pathname===l.href ? 'bg-slate-100' : ''}`}>
               {l.label}
             </Link>
           ))}
+          {/* Góc phải: Login / Tên user */}
+          <AuthButton />
         </div>
       </div>
     </nav>
