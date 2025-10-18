@@ -29,7 +29,7 @@ export default function TopNav() {
               {l.label}
             </Link>
           ))}
-          {/* Góc phải: Login / Tên user */}
+          {/* Nếu chưa đăng nhập, AuthButton sẽ hiển thị nút Đăng nhập; đã đăng nhập sẽ hiện avatar+menu */}
           <AuthButton />
         </div>
       </div>
