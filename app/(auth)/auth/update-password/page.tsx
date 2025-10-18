@@ -2,31 +2,25 @@
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '../../../../lib/supabase'
+import { getSupabase } from '../../../../lib/supabase-browser'
 
 export default function UpdatePassword() {
   const router = useRouter()
-  const [pw, setPw] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState<string|undefined>()
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({data}) => { if (!data.user) router.replace('/login') })
-  }, [router])
+  const [pw, setPw] = useState(''); const [err, setErr] = useState<string>(); const [loading, setLoading] = useState(false)
 
   async function onSubmit() {
-    setLoading(true); setErr(undefined)
-    const { error } = await supabase.auth.updateUser({
-      password: pw,
-      data: { must_change_password: false }
-    })
-    setLoading(false)
-    if (error) setErr(error.message)
-    else {
-      alert('Đổi mật khẩu thành công.')
-      router.replace('/')
+    try {
+      setLoading(true); setErr(undefined)
+      const supabase = getSupabase()
+      const { error } = await supabase.auth.updateUser({ password: pw, data: { must_change_password: false } })
+      if (error) { setErr(error.message); return }
+      alert('Đổi mật khẩu thành công'); router.replace('/')
+    } catch (e:any) {
+      setErr(String(e?.message || e))
+    } finally {
+      setLoading(false)
     }
   }
 
