@@ -242,29 +242,6 @@ export default function HomePage() {
           </div>
         </section>
       </main>
-
-      {/* FOOTER */}
-      <footer className="border-t bg-white">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 text-xs text-gray-500 flex items-center justify-between">
-          <div>© 2025 — Curriculum Matrices</div>
-          <div className="flex items-center gap-3">
-            <Image
-              src="/assets/brand/logo-ump.png"
-              alt="UMP"
-              width={24}
-              height={24}
-              className="h-6 w-6 rounded-full ring-1 ring-black/5 bg-white object-contain"
-            />
-            <Image
-              src="/assets/brand/logo-yhct.png"
-              alt="YHCT"
-              width={24}
-              height={24}
-              className="h-6 w-6 rounded-full ring-1 ring-black/5 bg-white object-contain"
-            />
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
