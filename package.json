@@ -13,8 +13,8 @@
     "next": "14.2.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "cytoscape": "^3.29.2",
-    "react-cytoscapejs": "^2.0.1"
+    "cytoscape": "^3.33.1",
+    "react-cytoscapejs": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "20.11.24",
