@@ -42,21 +42,28 @@ export default function HomePage() {
 
   return (
     <div className="bg-white text-gray-900">
-      {/* NAV (đơn giản, dùng TopNav hiện có nếu bạn muốn thống nhất) */}
-      <header className="sticky top-0 z-40 bg-white border-b border-gray-200">
+      {/* NAV: chỉ còn 1 header, thay menu theo yêu cầu */}
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-gray-200">
         <nav className="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 font-bold">
-            <span className="inline-block w-2 h-2 rounded-full bg-brand-600" />
-            <span>Curriculum Matrices</span>
+          <Link href="/" className="flex items-center gap-3 font-bold text-gray-900">
+            <div className="w-9 h-9 rounded-full bg-[#0E7BD0] grid place-items-center shadow-lg ring-1 ring-black/5">
+              <span className="text-white text-sm">YL</span>
+            </div>
+            <span>Năng Lực Y</span>
           </Link>
-          <div className="flex items-center gap-3">
-            {/* Các lối tắt phổ biến */}
-            <Link href="/class" className="text-sm hover:text-brand-700">
-              Heatmap lớp
+          <div className="flex items-center gap-2 md:gap-4">
+            <Link href="/student" className="text-sm font-medium text-gray-700 hover:text-[#0E7BD0]">
+              Sinh viên
+            </Link>
+            <Link href="/360-eval" className="text-sm font-medium text-gray-700 hover:text-[#0E7BD0]">
+              Đánh giá đa nguồn
+            </Link>
+            <Link href="/admin" className="text-sm font-medium text-gray-700 hover:text-[#0E7BD0]">
+              Quản trị
             </Link>
             <Link
               href="/login"
-              className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700"
+              className="inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold bg-[#0E7BD0] text-white hover:bg-[#0b65aa] shadow-sm"
             >
               Đăng nhập
             </Link>
@@ -77,7 +84,6 @@ export default function HomePage() {
             {/* Trái */}
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                {/* Đặt 2 logo vào public/assets/brand/ nếu bạn đã có sẵn; nếu chưa có sẽ hiển thị trống */}
                 <div className="w-20 h-20 rounded-full bg-white border border-black/10 shadow-md grid place-items-center overflow-hidden">
                   <Image
                     src="/assets/brand/logo-ump.png"
@@ -101,7 +107,7 @@ export default function HomePage() {
               <h1 className="text-3xl md:text-4xl font-bold leading-tight">
                 KHOA Y HỌC CỔ TRUYỀN
                 <br />
-                <span className="text-brand-700 text-[0.9em] font-semibold tracking-tight">
+                <span className="text-[#0E7BD0] text-[0.9em] font-semibold tracking-tight">
                   ĐẠI HỌC Y DƯỢC THÀNH PHỐ HỒ CHÍ MINH
                 </span>
               </h1>
@@ -112,8 +118,8 @@ export default function HomePage() {
 
               <div className="flex flex-wrap gap-3">
                 <Link
-                  className="inline-flex items-center justify-center rounded-lg px-4 py-2 font-bold gap-2 bg-brand-600 text-white hover:bg-brand-700 shadow ring-1 ring-black/5"
-                  href="/class"
+                  className="inline-flex items-center justify-center rounded-lg px-4 py-2 font-bold gap-2 bg-[#0E7BD0] text-white hover:bg-[#0b65aa] shadow ring-1 ring-black/5"
+                  href="/academic-affairs"
                 >
                   Bắt đầu ngay
                 </Link>
@@ -140,17 +146,12 @@ export default function HomePage() {
                       'shadow-[0_12px_28px_rgba(0,0,0,.12),_inset_0_1px_0_rgba(255,255,255,.35)]',
                       active === k ? 'translate-y-[-2px] scale-[1.03]' : 'hover:translate-y-[-2px] hover:scale-[1.02]',
                       k === 'mission'
-                        ? 'text-[#073b78] bg-[radial-gradient(120px_90px_at_30%_30%,rgba(255,255,255,.9),rgba(238,247,255,.95))] from-[#BADBFF] to-[#2D8FE8] bg-[length:100%_100%] bg-no-repeat'
-                        : '',
-                      k === 'vision'
-                        ? 'text-[#0e3a28] bg-[radial-gradient(120px_90px_at_30%_30%,rgba(255,255,255,.9),rgba(239,250,243,.95))]'
-                        : '',
-                      k === 'values'
-                        ? 'text-[#5b3600] bg-[radial-gradient(120px_90px_at_30%_30%,rgba(255,255,255,.92),rgba(255,250,232,.96))]'
-                        : '',
-                      k === 'philosophy'
-                        ? 'text-[#082e5e] bg-[radial-gradient(120px_90px_at_30%_30%,rgba(255,255,255,.9),rgba(237,246,255,.95))]'
-                        : '',
+                        ? 'text-[#073b78]'
+                        : k === 'vision'
+                        ? 'text-[#0e3a28]'
+                        : k === 'values'
+                        ? 'text-[#5b3600]'
+                        : 'text-[#082e5e]',
                     ].join(' ')}
                     style={
                       k === 'mission'
@@ -190,11 +191,9 @@ export default function HomePage() {
                 />
                 <h3 className="text-sm uppercase tracking-wider font-extrabold">{panel.title}</h3>
                 <p className="mt-2 leading-7 text-[.95rem]">{panel.text}</p>
-                <div className="pointer-events-none absolute inset-0"
-                  style={{
-                    background:
-                      'radial-gradient(400px 220px at -10% 0%, rgba(255,255,255,.55), transparent 40%)',
-                  }}
+                <div
+                  className="pointer-events-none absolute inset-0"
+                  style={{ background: 'radial-gradient(400px 220px at -10% 0%, rgba(255,255,255,.55), transparent 40%)' }}
                 />
               </article>
             </div>
@@ -202,38 +201,46 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* QUICK LINKS THEO ĐỐI TƯỢNG */}
+      {/* QUICK LINKS – làm mới màu sắc, icon & hiệu ứng */}
       <main className="max-w-7xl mx-auto px-4 md:px-6 py-10 space-y-10">
         <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Chọn đối tượng</h2>
-          </div>
+          <h2 className="text-xl font-semibold mb-5">Chọn đối tượng</h2>
 
-          <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {[
-              { href: '/student', title: 'Sinh viên', desc: 'Bảng tiến độ CLO/PLO, hồ sơ minh chứng, phản hồi 360°' },
-              { href: '/faculty', title: 'Giảng viên', desc: 'Rubric, quan sát, minh chứng, thống kê lớp/học phần' },
-              { href: '/department', title: 'Bộ môn', desc: 'Ma trận CLO–PLO, phân công, giám sát thực thi' },
-              { href: '/academic-affairs', title: 'Quản lý đào tạo', desc: 'Khung chương trình, phân bổ học phần, lộ trình' },
-              { href: '/qa', title: 'Đảm bảo chất lượng', desc: 'Chuẩn đầu ra, minh chứng, báo cáo CBME' },
-              { href: '/admin', title: 'Quản trị', desc: 'Người dùng, vai trò, RLS, cấu hình hệ thống' },
-              { href: '/360-eval', title: 'Đánh giá đa nguồn', desc: 'SV – GV – Đồng nghiệp – Người hướng dẫn – Tự đánh giá' },
-              { href: '/login', title: 'Đăng nhập', desc: 'Truy cập đầy đủ các chức năng theo vai trò' },
-            ].map((it) => (
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+            {CARD_ITEMS.map((it) => (
               <Link
                 key={it.href}
                 href={it.href}
-                className="group rounded-xl border border-gray-200 bg-white shadow hover:shadow-lg transition"
+                className="group relative rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm hover:shadow-xl transition-all duration-300"
               >
-                <div className="p-5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">{it.title}</h3>
-                    <span className="rounded-full bg-brand-50 text-brand-700 text-xs px-2 py-1 border">
+                {/* nền gradient nhẹ + glow khi hover */}
+                <div
+                  aria-hidden
+                  className="absolute inset-0 opacity-[.9] transition-opacity"
+                  style={{ background: it.bg }}
+                />
+                <div className="absolute -inset-1 rounded-2xl opacity-0 group-hover:opacity-100 transition ring-1 ring-[var(--ring)]"
+                  style={{ ['--ring' as any]: it.ring }} />
+                <div className="relative p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-11 h-11 rounded-xl grid place-items-center shadow ring-1 ring-black/5"
+                        style={{ background: it.iconBg }}
+                      >
+                        <span className="text-xl">{it.icon}</span>
+                      </div>
+                      <h3 className="font-semibold text-gray-900">{it.title}</h3>
+                    </div>
+                    <span
+                      className="rounded-full text-xs px-2 py-1 border bg-white/70 backdrop-blur group-hover:bg-white transition"
+                      style={{ borderColor: it.badgeBorder, color: it.badgeText }}
+                    >
                       Đi tới
                     </span>
                   </div>
-                  <p className="text-sm text-gray-700 mt-1">{it.desc}</p>
-                  <div className="mt-3 text-brand-700 text-sm opacity-0 group-hover:opacity-100 transition">
+                  <p className="text-sm text-gray-700 mt-2">{it.desc}</p>
+                  <div className="mt-4 text-sm font-medium text-[#0E7BD0] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition">
                     Mở ngay →
                   </div>
                 </div>
@@ -245,3 +252,96 @@ export default function HomePage() {
     </div>
   );
 }
+
+/* ---------------- UI data ---------------- */
+
+const CARD_ITEMS = [
+  {
+    href: '/student',
+    title: 'Sinh viên',
+    desc: 'Bảng tiến độ CLO/PLO, hồ sơ minh chứng, phản hồi 360°',
+    icon: '🎓',
+    iconBg: 'linear-gradient(135deg,#E6F2FF,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at -10% -20%, rgba(14,123,208,.08), transparent 50%), linear-gradient(180deg,#ffffff, #f7fbff)',
+    ring: '#90CAF9',
+    badgeBorder: '#90CAF9',
+    badgeText: '#0E7BD0',
+  },
+  {
+    href: '/faculty',
+    title: 'Giảng viên',
+    desc: 'Rubric, quan sát, minh chứng, thống kê lớp/học phần',
+    icon: '👩‍🏫',
+    iconBg: 'linear-gradient(135deg,#E8F8EF,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at 110% -20%, rgba(43,174,114,.10), transparent 50%), linear-gradient(180deg,#ffffff,#f6fdf9)',
+    ring: '#A5D6A7',
+    badgeBorder: '#81C784',
+    badgeText: '#2BAE72',
+  },
+  {
+    href: '/department',
+    title: 'Bộ môn',
+    desc: 'Ma trận CLO–PLO, phân công, giám sát thực thi',
+    icon: '🏫',
+    iconBg: 'linear-gradient(135deg,#FFF4E0,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at -10% -20%, rgba(245,159,0,.10), transparent 50%), linear-gradient(180deg,#ffffff,#fffaf0)',
+    ring: '#FFCC80',
+    badgeBorder: '#FFB74D',
+    badgeText: '#F59F00',
+  },
+  {
+    href: '/academic-affairs',
+    title: 'Quản lý đào tạo',
+    desc: 'Khung chương trình, phân bổ học phần, lộ trình',
+    icon: '🗂️',
+    iconBg: 'linear-gradient(135deg,#E9F0FF,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at 110% -20%, rgba(14,123,208,.08), transparent 50%), linear-gradient(180deg,#ffffff,#f6f9ff)',
+    ring: '#90CAF9',
+    badgeBorder: '#90CAF9',
+    badgeText: '#0E7BD0',
+  },
+  {
+    href: '/qa',
+    title: 'Đảm bảo chất lượng',
+    desc: 'Chuẩn đầu ra, minh chứng, báo cáo CBME',
+    icon: '✅',
+    iconBg: 'linear-gradient(135deg,#EAF7EC,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at -10% -20%, rgba(43,174,114,.10), transparent 50%), linear-gradient(180deg,#ffffff,#f6fdf8)',
+    ring: '#A5D6A7',
+    badgeBorder: '#81C784',
+    badgeText: '#2BAE72',
+  },
+  {
+    href: '/admin',
+    title: 'Quản trị',
+    desc: 'Người dùng, vai trò, RLS, cấu hình hệ thống',
+    icon: '⚙️',
+    iconBg: 'linear-gradient(135deg,#F2F2F2,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at 110% -20%, rgba(0,0,0,.06), transparent 50%), linear-gradient(180deg,#ffffff,#f8f9fb)',
+    ring: '#B0BEC5',
+    badgeBorder: '#B0BEC5',
+    badgeText: '#37474F',
+  },
+  {
+    href: '/360-eval',
+    title: 'Đánh giá đa nguồn',
+    desc: 'SV – GV – Đồng nghiệp – Người hướng dẫn – Tự đánh giá',
+    icon: '📊',
+    iconBg: 'linear-gradient(135deg,#FFF0F6,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at -10% -20%, rgba(233,30,99,.08), transparent 50%), linear-gradient(180deg,#ffffff,#fff7fb)',
+    ring: '#F8BBD0',
+    badgeBorder: '#F48FB1',
+    badgeText: '#AD1457',
+  },
+  {
+    href: '/login',
+    title: 'Đăng nhập',
+    desc: 'Truy cập đầy đủ các chức năng theo vai trò',
+    icon: '🔐',
+    iconBg: 'linear-gradient(135deg,#EEF7FF,#FFFFFF)',
+    bg: 'radial-gradient(600px 300px at 110% -20%, rgba(14,123,208,.08), transparent 50%), linear-gradient(180deg,#ffffff,#f6faff)',
+    ring: '#90CAF9',
+    badgeBorder: '#90CAF9',
+    badgeText: '#0E7BD0',
+  },
+];
