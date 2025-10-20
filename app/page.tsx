@@ -242,7 +242,7 @@ const CARD_ITEMS = [
     badgeText: '#0E7BD0',
   },
   {
-    href: '/faculty',
+    href: '/teacher',
     title: 'Giảng viên',
     desc: 'Rubric, quan sát, minh chứng, thống kê lớp/học phần',
     icon: '👩‍🏫',
