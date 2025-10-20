@@ -1,4 +1,3 @@
-// app/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -42,34 +41,7 @@ export default function HomePage() {
 
   return (
     <div className="bg-white text-gray-900">
-      {/* NAV: chỉ còn 1 header, thay menu theo yêu cầu */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-gray-200">
-        <nav className="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 font-bold text-gray-900">
-            <div className="w-9 h-9 rounded-full bg-[#0E7BD0] grid place-items-center shadow-lg ring-1 ring-black/5">
-              <span className="text-white text-sm">YL</span>
-            </div>
-            <span>Năng Lực Y</span>
-          </Link>
-          <div className="flex items-center gap-2 md:gap-4">
-            <Link href="/student" className="text-sm font-medium text-gray-700 hover:text-[#0E7BD0]">
-              Sinh viên
-            </Link>
-            <Link href="/360-eval" className="text-sm font-medium text-gray-700 hover:text-[#0E7BD0]">
-              Đánh giá đa nguồn
-            </Link>
-            <Link href="/admin" className="text-sm font-medium text-gray-700 hover:text-[#0E7BD0]">
-              Quản trị
-            </Link>
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold bg-[#0E7BD0] text-white hover:bg-[#0b65aa] shadow-sm"
-            >
-              Đăng nhập
-            </Link>
-          </div>
-        </nav>
-      </header>
+      {/* Đã bỏ header riêng tại đây vì TopNav đã được render ở layout */}
 
       {/* HERO */}
       <section
@@ -201,7 +173,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* QUICK LINKS – làm mới màu sắc, icon & hiệu ứng */}
+      {/* QUICK LINKS */}
       <main className="max-w-7xl mx-auto px-4 md:px-6 py-10 space-y-10">
         <section>
           <h2 className="text-xl font-semibold mb-5">Chọn đối tượng</h2>
@@ -219,8 +191,10 @@ export default function HomePage() {
                   className="absolute inset-0 opacity-[.9] transition-opacity"
                   style={{ background: it.bg }}
                 />
-                <div className="absolute -inset-1 rounded-2xl opacity-0 group-hover:opacity-100 transition ring-1 ring-[var(--ring)]"
-                  style={{ ['--ring' as any]: it.ring }} />
+                <div
+                  className="absolute -inset-1 rounded-2xl opacity-0 group-hover:opacity-100 transition ring-1 ring-[var(--ring)]"
+                  style={{ ['--ring' as any]: it.ring }}
+                />
                 <div className="relative p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
