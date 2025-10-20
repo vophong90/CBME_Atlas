@@ -1,45 +1,72 @@
 // app/api/department/results/upload/route.ts
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseServer';
-import { parseCsvText } from '@/lib/csv';
+export const dynamic = 'force-dynamic';
 
+function parseCsv(text: string): string[][] {
+  return text.trim().split(/\r?\n/).map(l => l.split(',').map(c => c.trim()));
+}
+
+/**
+ * CSV expected columns (không phân biệt hoa thường, chấp nhận nhiều cách đặt tên):
+ * - MSSV
+ * - Mã học phần | Course | CourseCode
+ * - Mã CLO | CLO
+ * - Trạng thái | Status  (achieved|not_yet)
+ * - (Tuỳ chọn) Mã PLO | PLO
+ * - (Tuỳ chọn) Level
+ */
 export async function POST(req: Request) {
-  const fd = await req.formData();
-  const framework_id = String(fd.get('framework_id') || '');
-  const file = fd.get('file') as File | null;
-  if (!framework_id || !file) return NextResponse.json({ error: 'Thiếu framework/file' }, { status: 400 });
+  try {
+    const fd = await req.formData();
+    const framework_id = String(fd.get('framework_id') || '');
+    const file = fd.get('file') as File | null;
 
-  const text = await file.text();
-  const rows = parseCsvText(text); // trả về string[][] đã trim
-  const header = rows[0] || [];
-  // map cột
-  const idx = {
-    mssv: header.findIndex(h => /mssv/i.test(h)),
-    course: header.findIndex(h => /course|mã học phần/i.test(h)),
-    clo: header.findIndex(h => /clo/i.test(h)),
-    level: header.findIndex(h => /level/i.test(h)),
-    status: header.findIndex(h => /status|trạng thái/i.test(h)),
-    plo: header.findIndex(h => /plo/i.test(h)), // optional
-  };
-  if ([idx.mssv, idx.course, idx.clo, idx.level, idx.status].some(i => i < 0)) {
-    return NextResponse.json({ error: 'Thiếu cột bắt buộc trong CSV' }, { status: 400 });
+    if (!framework_id || !file) {
+      return NextResponse.json({ error: 'Thiếu framework_id hoặc file' }, { status: 400 });
+    }
+
+    const text = await file.text();
+    const rows = parseCsv(text);
+    if (!rows.length) return NextResponse.json({ error: 'CSV rỗng' }, { status: 400 });
+
+    const header = rows[0].map(h => h.toLowerCase());
+    const find = (alts: string[]) =>
+      header.findIndex(h => alts.some(a => h.includes(a)));
+
+    const idx = {
+      mssv: find(['mssv', 'student']),
+      course: find(['mã học phần', 'course', 'coursecode']),
+      clo: find(['mã clo', 'clo']),
+      status: find(['trạng thái', 'status']),
+      // optional
+      plo: find(['mã plo', 'plo']),
+      level: find(['level', 'mức độ'])
+    };
+
+    if ([idx.mssv, idx.course, idx.clo, idx.status].some(i => i < 0)) {
+      return NextResponse.json({ error: 'CSV thiếu cột bắt buộc: MSSV, Mã học phần, Mã CLO, Trạng thái' }, { status: 400 });
+    }
+
+    const data = rows.slice(1).filter(r => r.length >= header.length).map(r => ({
+      mssv: r[idx.mssv],
+      framework_id,
+      course_code: r[idx.course],
+      clo_code: r[idx.clo],
+      status: (r[idx.status] || '').toLowerCase() === 'achieved' ? 'achieved' : 'not_yet',
+      score: null,
+      passed: null,
+      updated_at: new Date().toISOString(),
+      // CSV có thể có PLO/LEVEL nhưng bảng uploads hiện không có cột -> bỏ qua; level sẽ đối chiếu từ link.
+    }));
+
+    if (!data.length) return NextResponse.json({ error: 'Không có dòng dữ liệu hợp lệ' }, { status: 400 });
+
+    const { error } = await supabaseAdmin.from('student_clo_results_uploads').insert(data);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+    return NextResponse.json({ ok: true, inserted: data.length });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Upload lỗi' }, { status: 500 });
   }
-
-  const data = rows.slice(1).filter(r => r.length >= header.length).map(r => ({
-    mssv: r[idx.mssv],
-    framework_id,
-    course_code: r[idx.course],
-    clo_code: r[idx.clo],
-    status: (r[idx.status] || '').toLowerCase() === 'achieved' ? 'achieved' : 'not_yet',
-    score: null,
-    passed: null,
-    // nếu muốn lưu level số:
-    // nb: backend của bạn có cột `level` trong links, còn uploads thì tuỳ — nếu cần, thêm cột level vào uploads.
-    updated_at: new Date().toISOString(),
-  }));
-
-  const { error } = await supabaseAdmin.from('student_clo_results_uploads').insert(data);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-  return NextResponse.json({ ok: true, inserted: data.length });
 }
