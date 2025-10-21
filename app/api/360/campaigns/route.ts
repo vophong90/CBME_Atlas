@@ -1,58 +1,110 @@
-import { NextResponse } from 'next/server';
-import { getSupabase, supabaseAdmin } from '@/lib/supabaseServer';
-
+// app/api/360/campaigns/route.ts
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** GET ?active=1&course_code=TM101 : liệt kê campaign */
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabaseServer';
+
+// Kiểu payload mở (tuỳ cột bạn có trong bảng evaluation_campaigns)
+type UpsertPayload = Record<string, any>;
+
+/**
+ * GET /api/360/campaigns?id=...&limit=...&q=...
+ * - Nếu có id: trả về 1 campaign
+ * - Nếu không: trả danh sách (có thể filter q, limit)
+ */
 export async function GET(req: Request) {
-  const supabase = getSupabase();
-  const url = new URL(req.url);
-  const active = url.searchParams.get('active');
-  const course_code = url.searchParams.get('course_code') || undefined;
+  const db = createServiceClient(); // luôn có, nếu thiếu ENV sẽ throw và vào catch
 
-  let q = supabase.from('evaluation_campaigns')
-    .select('id,name,framework_id,course_code,rubric_id,start_at,end_at,weights,min_responses,anonymity,created_by,created_at')
-    .order('start_at', { ascending: false });
+  try {
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id');
+    const q = url.searchParams.get('q')?.trim();
+    const limit = Number(url.searchParams.get('limit') ?? '100');
 
-  if (course_code) q = q.eq('course_code', course_code);
-  if (active === '1') {
-    const now = new Date().toISOString();
-    q = q.lte('start_at', now).gte('end_at', now);
+    if (id) {
+      const { data, error } = await db
+        .from('evaluation_campaigns')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      return NextResponse.json({ item: data });
+    }
+
+    let query = db.from('evaluation_campaigns').select('*').order('created_at', { ascending: false }).limit(limit);
+    if (q) {
+      // tuỳ DB, có thể đổi sang ilike nhiều cột
+      query = query.ilike('name', `%${q}%`);
+    }
+    const { data, error } = await query;
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ items: data ?? [] });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
   }
-
-  const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ items: data });
 }
 
-/** POST (service role): tạo/sửa campaign */
+/**
+ * POST /api/360/campaigns
+ * body: { id?: string, ...payload }
+ * - Có id  -> UPDATE + return row
+ * - Không  -> INSERT + return row
+ */
 export async function POST(req: Request) {
-  const body = await req.json();
-  const {
-    id, name, framework_id, course_code, rubric_id, start_at, end_at,
-    weights, min_responses, anonymity, created_by
-  } = body;
+  const db = createServiceClient();
 
-  const db = supabaseAdmin; // dùng service role
+  try {
+    const body = (await req.json().catch(() => ({}))) as { id?: string } & UpsertPayload;
+    const { id, ...payload } = body || {};
 
-  if (!name || !rubric_id || !start_at || !end_at || !created_by) {
-    return NextResponse.json({ error: 'name, rubric_id, start_at, end_at, created_by required' }, { status: 400 });
+    if (!payload || Object.keys(payload).length === 0) {
+      return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
+    }
+
+    if (id) {
+      const { data, error } = await db
+        .from('evaluation_campaigns')
+        .update(payload)
+        .eq('id', id)
+        .select('*')
+        .single();
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ item: data });
+    } else {
+      const { data, error } = await db
+        .from('evaluation_campaigns')
+        .insert(payload)
+        .select('*')
+        .single();
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ item: data });
+    }
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
   }
+}
 
-  const payload = {
-    name, framework_id: framework_id ?? null, course_code: course_code ?? null, rubric_id,
-    start_at, end_at,
-    weights: weights ?? { self: 0.2, peer: 0.3, faculty: 0.5 },
-    min_responses: min_responses ?? { peer: 3, faculty: 1 },
-    anonymity: anonymity ?? { peer: true, faculty: false },
-    created_by
-  };
+/**
+ * DELETE /api/360/campaigns?id=...
+ */
+export async function DELETE(req: Request) {
+  const db = createServiceClient();
 
-  const query = id
-    ? db.from('evaluation_campaigns').update(payload).eq('id', id).select().single()
-    : db.from('evaluation_campaigns').insert(payload).select().single();
+  try {
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ item: data });
+    const { error } = await db.from('evaluation_campaigns').delete().eq('id', id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
+  }
 }
