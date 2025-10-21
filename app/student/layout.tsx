@@ -6,15 +6,55 @@ import { useEffect, useState } from 'react';
 import { StudentProvider, useStudentCtx } from './context';
 
 /* inline icons (no deps) */
-const MenuIcon = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path strokeWidth="1.75" strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" /></svg>);
-const ChevronLeft = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M15 6l-6 6 6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const ChevronRight = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M9 6l6 6-6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const MenuIcon = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path strokeWidth="1.75" strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" />
+  </svg>
+);
+const ChevronLeft = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M15 6l-6 6 6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+const ChevronRight = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M9 6l6 6-6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/* simple inline icons for nav */
+const TargetIcon = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="5" />
+    <circle cx="12" cy="12" r="2" />
+  </svg>
+);
+const LayersIcon = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M12 2l9 5-9 5-9-5 9-5z" />
+    <path d="M3 12l9 5 9-5" />
+    <path d="M3 17l9 5 9-5" />
+  </svg>
+);
+const MessageSquare = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M21 15a2 2 0 01-2 2H8l-4 4V5a2 2 0 012-2h13a2 2 0 012 2z" />
+  </svg>
+);
+const ClipboardList = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <rect x="7" y="3" width="10" height="18" rx="2" />
+    <path d="M9 7h6M9 11h6M9 15h6" />
+    <path d="M9 3h6v3H9z" />
+  </svg>
+);
 
 const NAV = [
-  { href: '/student/pi', label: 'Tiến độ PI', desc: 'Mức độ đạt PI' },
-  { href: '/student/plo', label: 'Tiến độ PLO', desc: 'Tổng thể chương trình' },
-  { href: '/student/feedback', label: 'Phản hồi', desc: 'Góp ý học phần/giảng viên' },
-  { href: '/student/surveys', label: 'Khảo sát', desc: 'Phiếu khảo sát' },
+  { href: '/student/pi', label: 'Tiến độ PI', desc: 'Mức độ đạt PI', Icon: TargetIcon },
+  { href: '/student/plo', label: 'Tiến độ PLO', desc: 'Tổng thể chương trình', Icon: LayersIcon },
+  { href: '/student/feedback', label: 'Phản hồi', desc: 'Góp ý học phần/giảng viên', Icon: MessageSquare },
+  { href: '/student/surveys', label: 'Khảo sát', desc: 'Phiếu khảo sát', Icon: ClipboardList },
 ];
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -24,11 +64,20 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => { try { const s = localStorage.getItem('studentSidebarCollapsed'); if (s) setCollapsed(s==='1'); } catch {} }, []);
-  useEffect(() => { try { localStorage.setItem('studentSidebarCollapsed', collapsed ? '1':'0'); } catch {} }, [collapsed]);
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem('studentSidebarCollapsed');
+      if (s) setCollapsed(s === '1');
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem('studentSidebarCollapsed', collapsed ? '1' : '0');
+    } catch {}
+  }, [collapsed]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white text-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-white text-slate-900">
       {/* Topbar (mobile) */}
       <div className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/80 px-3 backdrop-blur md:hidden">
         <button onClick={() => setMobileOpen(true)} className="rounded-lg border border-slate-200 p-2 active:scale-95">
@@ -37,36 +86,50 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="text-base font-semibold">Sinh viên</div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-slate-600">SV:</span>
-          <input value={studentId} onChange={e=>setStudentId(e.target.value)}
-                 placeholder="student_id"
-                 className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+          <input
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+            placeholder="student_id"
+            className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
+          />
         </div>
       </div>
 
       <div className="mx-auto flex max-w-[1400px]">
         {/* Sidebar (desktop) */}
-        <aside className={['hidden md:flex md:sticky md:top-0 md:h-[100dvh] md:flex-col md:border-r md:border-slate-200 md:bg-white', collapsed?'md:w-16':'md:w-72'].join(' ')}>
+        <aside
+          className={[
+            'hidden md:flex md:sticky md:top-0 md:h-[100dvh] md:flex-col md:border-r md:border-slate-200 md:bg-white',
+            collapsed ? 'md:w-16' : 'md:w-72',
+          ].join(' ')}
+        >
           <div className="flex items-center justify-between gap-2 p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-white shadow">SV</div>
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">SV</div>
             {!collapsed && <div className="text-sm font-semibold">Trang sinh viên</div>}
-            <button onClick={()=>setCollapsed(v=>!v)} className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50">
+            <button onClick={() => setCollapsed((v) => !v)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
               {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
           <nav className="flex-1 space-y-1 px-2 pb-3">
-            {NAV.map(item=>{
-              const active = pathname===item.href || pathname.startsWith(item.href + '/');
+            {NAV.map(({ href, label, desc, Icon }) => {
+              const active = pathname === href || pathname.startsWith(href + '/');
               return (
-                <Link key={item.href} href={item.href}
-                      className={['group relative flex items-center rounded-xl px-2 py-2 transition', active?'bg-slate-900 text-white shadow':'text-slate-700 hover:bg-slate-100'].join(' ')}>
-                  <div className="mr-2 h-5 w-5 rounded bg-slate-200" /> {/* placeholder icon */}
-                  <div className={collapsed ? 'sr-only':'min-w-0'}>
-                    <div className="truncate text-sm font-medium">{item.label}</div>
-                    <div className="truncate text-xs text-slate-500">{item.desc}</div>
+                <Link
+                  key={href}
+                  href={href}
+                  className={[
+                    'group relative flex items-center rounded-xl px-2 py-2 transition',
+                    active ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-brand-50',
+                  ].join(' ')}
+                >
+                  <Icon className={['mr-2 h-5 w-5', active ? 'text-white' : 'text-slate-500'].join(' ')} />
+                  <div className={collapsed ? 'sr-only' : 'min-w-0'}>
+                    <div className="truncate text-sm font-medium">{label}</div>
+                    <div className={['truncate text-xs', active ? 'text-white/80' : 'text-slate-500'].join(' ')}>{desc}</div>
                   </div>
                   {collapsed && (
-                    <span className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition group-hover:opacity-100">
-                      {item.label}
+                    <span className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-brand-700 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                      {label}
                     </span>
                   )}
                 </Link>
@@ -79,25 +142,32 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* Mobile Drawer */}
         {mobileOpen && (
           <>
-            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden" onClick={()=>setMobileOpen(false)} />
+            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
             <aside className="fixed left-0 top-0 z-50 h-full w-72 overflow-y-auto border-r border-slate-200 bg-white md:hidden">
               <div className="flex items-center justify-between gap-2 p-3">
                 <div className="flex items-center gap-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-white shadow">SV</div>
+                  <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">SV</div>
                   <div className="text-sm font-semibold">Trang sinh viên</div>
                 </div>
-                <button onClick={()=>setMobileOpen(false)} className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50">
+                <button onClick={() => setMobileOpen(false)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
                   <ChevronLeft className="h-4 w-4" />
                 </button>
               </div>
               <nav className="space-y-1 px-2 pb-3">
-                {NAV.map(item=>{
-                  const active = pathname===item.href || pathname.startsWith(item.href + '/');
+                {NAV.map(({ href, label, Icon }) => {
+                  const active = pathname === href || pathname.startsWith(href + '/');
                   return (
-                    <Link key={item.href} href={item.href} onClick={()=>setMobileOpen(false)}
-                          className={['flex items-center rounded-xl px-2 py-2 transition', active?'bg-slate-900 text-white shadow':'text-slate-700 hover:bg-slate-100'].join(' ')}>
-                      <div className="mr-2 h-5 w-5 rounded bg-slate-200" />
-                      <span className="text-sm font-medium">{item.label}</span>
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMobileOpen(false)}
+                      className={[
+                        'flex items-center rounded-xl px-2 py-2 transition',
+                        active ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-brand-50',
+                      ].join(' ')}
+                    >
+                      <Icon className={['mr-2 h-5 w-5', active ? 'text-white' : 'text-slate-500'].join(' ')} />
+                      <span className="text-sm font-medium">{label}</span>
                     </Link>
                   );
                 })}
@@ -117,9 +187,12 @@ function Shell({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="hidden md:flex items-center gap-2">
                   <span className="text-sm text-slate-600">SV:</span>
-                  <input value={studentId} onChange={e=>setStudentId(e.target.value)}
-                         placeholder="student_id (tùy chọn)"
-                         className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:ring" />
+                  <input
+                    value={studentId}
+                    onChange={(e) => setStudentId(e.target.value)}
+                    placeholder="student_id (tùy chọn)"
+                    className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
+                  />
                 </div>
               </div>
             </div>
