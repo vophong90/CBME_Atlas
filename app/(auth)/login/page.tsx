@@ -1,61 +1,170 @@
-'use client'
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+'use client';
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { getSupabase } from '../../../lib/supabase-browser'   // ⬅️ đổi import
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { getSupabase } from '@/lib/supabase-browser';
 
-const STUDENT_DOMAIN = process.env.NEXT_PUBLIC_STUDENT_EMAIL_DOMAIN || 'students.local'
+/* Inline icons (no deps) */
+const Eye = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>);
+const EyeOff = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 104.24 4.24"/><path d="M9.88 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a17.22 17.22 0 01-3.84 4.66M6.11 6.11A17.86 17.86 0 001 12s4 8 11 8a10.94 10.94 0 005.06-1.22"/></svg>);
+const Mail = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg>);
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [mode, setMode] = useState<'student'|'email'>('student')
-  const [mssv, setMssv] = useState(''); const [email, setEmail] = useState(''); const [pass, setPass] = useState('')
-  const [msg, setMsg] = useState(''); const [loading, setLoading] = useState(false)
+  const supabase = getSupabase();
+  const router = useRouter();
 
-  async function login() {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Nếu đã đăng nhập thì chuyển vào app
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) router.replace('/');
+    });
+  }, [router, supabase]);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    setLoading(true);
     try {
-      setLoading(true); setMsg('')
-      const supabase = getSupabase()
-      const loginEmail = mode === 'student' ? `${mssv}@${STUDENT_DOMAIN}`.toLowerCase() : email
-      const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: pass })
-      if (error) { setMsg('Lỗi: ' + error.message); return }
-      const must = !!data?.user?.user_metadata?.must_change_password
-      router.replace(must ? '/auth/update-password' : '/')
-    } catch (e:any) {
-      setMsg('Exception: ' + String(e?.message || e))
-      console.error(e)
+      const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+      if (error) throw error;
+      if (!remember) {
+        // ép session chỉ trong memory: xoá khỏi storage sau login (tuỳ chiến lược)
+        // Ở client Supabase v2 không có toggle persistent chính thức;
+        // bạn có thể tuỳ biến: sign-in xong -> store token in-memory app state (phức tạp).
+      }
+      router.replace('/');
+    } catch (e: any) {
+      setErr(e?.message ?? 'Đăng nhập thất bại');
     } finally {
-      setLoading(false)
+      setLoading(false);
+    }
+  }
+
+  async function onForgot() {
+    setErr(null);
+    setNotice(null);
+    if (!email) {
+      setErr('Nhập email để nhận liên kết đặt lại mật khẩu.');
+      return;
+    }
+    try {
+      setLoading(true);
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const redirectTo = `${origin}/auth/update-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      if (error) throw error;
+      setNotice('Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư của bạn.');
+    } catch (e: any) {
+      setErr(e?.message ?? 'Không thể gửi email đặt lại mật khẩu');
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 py-12">
-      <h1 className="text-2xl font-semibold">Đăng nhập</h1>
-      <div className="mt-4 flex gap-2">
-        <button className={`px-3 py-1.5 rounded-lg border ${mode==='student'?'bg-slate-100':''}`} onClick={()=>setMode('student')}>Sinh viên</button>
-        <button className={`px-3 py-1.5 rounded-lg border ${mode==='email'?'bg-slate-100':''}`} onClick={()=>setMode('email')}>Email</button>
+    <div className="min-h-screen grid md:grid-cols-2 bg-gradient-to-br from-slate-50 to-white">
+      {/* Left visual */}
+      <div className="hidden md:flex items-center justify-center p-10 bg-slate-900 text-white">
+        <div className="max-w-md">
+          <div className="text-3xl font-semibold">Chào mừng đến CBME Atlas</div>
+          <p className="mt-3 text-slate-300">
+            Đăng nhập để quản lý chương trình, khảo sát chất lượng, và theo dõi kết quả theo thời gian thực.
+          </p>
+          <ul className="mt-6 space-y-2 text-sm text-slate-300">
+            <li>• Single workspace cho giảng viên & QA</li>
+            <li>• Báo cáo trực quan & xuất dữ liệu</li>
+            <li>• Bảo mật theo vai trò (RBAC)</li>
+          </ul>
+        </div>
       </div>
-      <div className="card mt-4 space-y-3">
-        {mode==='student' ? (
-          <>
-            <input className="border rounded-lg px-3 py-2 w-full" placeholder="Mã số sinh viên (VD: SV001)" value={mssv} onChange={e=>setMssv(e.target.value)} />
-            <input className="border rounded-lg px-3 py-2 w-full" type="password" placeholder="Mật khẩu" value={pass} onChange={e=>setPass(e.target.value)} />
-            <div className="text-xs text-slate-500">Email tương đương: <code>{mssv ? `${mssv}@${STUDENT_DOMAIN}` : `<MSSV>@${STUDENT_DOMAIN}`}</code></div>
-          </>
-        ) : (
-          <>
-            <input className="border rounded-lg px-3 py-2 w-full" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-            <input className="border rounded-lg px-3 py-2 w-full" type="password" placeholder="Mật khẩu" value={pass} onChange={e=>setPass(e.target.value)} />
-          </>
-        )}
-        <button disabled={loading} onClick={login} className="px-4 py-2 rounded-lg bg-[var(--brand-primary)] text-white w-full">
-          {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-        </button>
-        {!!msg && <div className="text-sm mt-2 p-2 bg-slate-50 rounded border">{msg}</div>}
+
+      {/* Right form */}
+      <div className="flex items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <div className="mb-8">
+            <div className="h-12 w-12 grid place-items-center rounded-2xl bg-slate-900 text-white">AT</div>
+            <h1 className="mt-4 text-2xl font-semibold">Đăng nhập</h1>
+            <p className="text-sm text-slate-600">Sử dụng tài khoản được cấp bởi Quản trị hệ thống.</p>
+          </div>
+
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <div className="mt-1 relative">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:ring"
+                  placeholder="you@university.edu"
+                />
+                <Mail className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Mật khẩu</label>
+              <div className="mt-1 relative">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={pw}
+                  onChange={(e) => setPw(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:ring"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-500 hover:bg-slate-100"
+                  aria-label={showPw ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                >
+                  {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="h-4 w-4" checked={remember} onChange={(e)=>setRemember(e.target.checked)} />
+                Ghi nhớ đăng nhập
+              </label>
+              <button type="button" onClick={onForgot} className="text-sm text-slate-700 underline hover:opacity-80">
+                Quên mật khẩu?
+              </button>
+            </div>
+
+            {err && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+            {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl bg-slate-900 px-3 py-2 text-white hover:opacity-95 active:scale-[0.99] disabled:opacity-50"
+            >
+              {loading ? 'Đang xử lý...' : 'Đăng nhập'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-xs text-slate-500">
+            Cần tài khoản? Liên hệ Quản trị viên để được cấp quyền.
+          </div>
+
+          <div className="mt-6 text-center">
+            <Link className="text-xs text-slate-500 underline" href="/">← Về Trang chủ</Link>
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 }
