@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { getSupabase } from '@/lib/supabase-browser';
 
 type Role = 'lecturer' | 'student' | 'support';
 
@@ -9,64 +10,88 @@ type Person = {
   id: string;
   name: string;
   email: string;
-  extra?: string; // Bộ môn / Khung CTĐT / Đơn vị
+  extra?: string;
 };
 
 export default function TargetingPage() {
+  const supabase = getSupabase();
   const searchParams = useSearchParams();
-  const surveyId = searchParams.get('surveyId') ?? ''; // truyền ?surveyId=... khi mở trang
+  const surveyId = searchParams.get('surveyId') ?? '';
 
   const [role, setRole] = useState<Role>('lecturer');
-  const [dept, setDept] = useState<string>('');        // Bộ môn (lecturer)
-  const [cohort, setCohort] = useState<string>('');    // Khung CTĐT (student)
-  const [unit, setUnit] = useState<string>('');        // Đơn vị (support)
+  const [dept, setDept] = useState('');
+  const [cohort, setCohort] = useState('');
+  const [unit, setUnit] = useState('');
 
   const [people, setPeople] = useState<Person[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [selectAll, setSelectAll] = useState(false);
-
-  const [message, setMessage] = useState<string>('');
+  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Demo options (thay bằng fetch thật khi có API)
   const departments = ['YHCT Nội', 'YHCT Ngoại', 'Châm cứu', 'Dược cổ truyền'];
   const cohorts = ['Khung 2022', 'Khung 2024'];
   const units = ['Phòng Khảo thí', 'Phòng Đảm bảo chất lượng'];
 
-  // Lấy danh sách người theo vai trò + bộ lọc
   useEffect(() => {
     let abort = false;
-
     async function load() {
       setLoading(true);
       setToast(null);
       setSelectAll(false);
       setSelected({});
       try {
-        // Nếu đã có API riêng của bạn, thay đoạn dưới bằng fetch tới endpoint thật.
-        // Ví dụ: const res = await fetch(`/api/qa/targeting?role=${role}&dept=${dept}&cohort=${cohort}&unit=${unit}`);
-        // const data = await res.json();
-
-        // Mock data tối giản để trang không vỡ khi chưa có backend
-        const mock: Person[] =
+        // Thử lấy từ bảng profiles (nếu có)
+        let loaded: Person[] = [];
+        const tableCandidates =
           role === 'lecturer'
-            ? [
-                { id: 'lec1', name: 'BS. Nguyễn A', email: 'nguyena@example.com', extra: 'YHCT Nội' },
-                { id: 'lec2', name: 'ThS. Trần B', email: 'tranb@example.com', extra: 'Châm cứu' },
-              ]
+            ? ['profiles', 'teacher.profiles']
             : role === 'student'
-            ? [
-                { id: 'stu1', name: 'SV. Lê C', email: 'lec@example.com', extra: 'Khung 2022' },
-                { id: 'stu2', name: 'SV. Phạm D', email: 'phamd@example.com', extra: 'Khung 2024' },
-              ]
-            : [
-                { id: 'sup1', name: 'NV. Võ E', email: 'voe@example.com', extra: 'Phòng Khảo thí' },
-                { id: 'sup2', name: 'NV. Hồ F', email: 'hof@example.com', extra: 'Phòng ĐBCL' },
-              ];
+            ? ['profiles', 'student.profiles']
+            : ['profiles', 'support.profiles'];
 
-        // Lọc theo các combobox nếu có chọn
-        const filtered = mock.filter((p) => {
+        for (const tbl of tableCandidates) {
+          const [schema, name] = tbl.includes('.') ? tbl.split('.') : ['public', tbl];
+          const { data, error } = await supabase
+            .from(name)
+            .select('id,name,email,department,cohort,unit')
+            .limit(2000);
+          if (error?.code === '42P01') continue; // table not found -> thử bảng khác
+          if (error) throw error;
+          if (data && data.length > 0) {
+            loaded = (data as any[]).map((r) => ({
+              id: r.id,
+              name: r.name ?? r.email ?? r.id,
+              email: r.email ?? '',
+              extra:
+                role === 'lecturer' ? r.department ?? '' : role === 'student' ? r.cohort ?? '' : r.unit ?? '',
+            }));
+            break;
+          }
+        }
+
+        // Fallback mock nếu không có bảng nào ở trên
+        if (loaded.length === 0) {
+          loaded =
+            role === 'lecturer'
+              ? [
+                  { id: 'lec1', name: 'BS. Nguyễn A', email: 'nguyena@example.com', extra: 'YHCT Nội' },
+                  { id: 'lec2', name: 'ThS. Trần B', email: 'tranb@example.com', extra: 'Châm cứu' },
+                ]
+              : role === 'student'
+              ? [
+                  { id: 'stu1', name: 'SV. Lê C', email: 'lec@example.com', extra: 'Khung 2022' },
+                  { id: 'stu2', name: 'SV. Phạm D', email: 'phamd@example.com', extra: 'Khung 2024' },
+                ]
+              : [
+                  { id: 'sup1', name: 'NV. Võ E', email: 'voe@example.com', extra: 'Phòng Khảo thí' },
+                  { id: 'sup2', name: 'NV. Hồ F', email: 'hof@example.com', extra: 'Phòng ĐBCL' },
+                ];
+        }
+
+        // Lọc theo combobox
+        const filtered = loaded.filter((p) => {
           if (role === 'lecturer' && dept) return p.extra === dept;
           if (role === 'student' && cohort) return p.extra === cohort;
           if (role === 'support' && unit) return p.extra === unit;
@@ -80,30 +105,22 @@ export default function TargetingPage() {
         if (!abort) setLoading(false);
       }
     }
-
     load();
     return () => {
       abort = true;
     };
-  }, [role, dept, cohort, unit]);
+  }, [role, dept, cohort, unit, supabase]);
 
   const rows = useMemo(() => people, [people]);
-
-  const selectedCount = useMemo(
-    () => rows.filter((r) => selected[r.id]).length,
-    [rows, selected]
-  );
+  const selectedCount = useMemo(() => rows.filter((r) => selected[r.id]).length, [rows, selected]);
 
   function toggleAll() {
     const next = !selectAll;
     setSelectAll(next);
     const map: Record<string, boolean> = {};
-    rows.forEach((r) => {
-      map[r.id] = next;
-    });
+    rows.forEach((r) => (map[r.id] = next));
     setSelected(map);
   }
-
   function toggleOne(id: string) {
     setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
   }
@@ -113,7 +130,7 @@ export default function TargetingPage() {
       setToast({ type: 'error', text: 'Thiếu surveyId trên URL (?surveyId=...)' });
       return;
     }
-    const recipients = rows.filter((r) => selected[r.id]).map((r) => r.email);
+    const recipients = rows.filter((r) => selected[r.id]).map((r) => r.email).filter(Boolean);
     if (recipients.length === 0) {
       setToast({ type: 'error', text: 'Chưa chọn người nhận nào' });
       return;
@@ -121,6 +138,7 @@ export default function TargetingPage() {
     setLoading(true);
     setToast(null);
     try {
+      // Gọi route API của bạn
       const res = await fetch(`/api/qa/surveys/${surveyId}/send-invites`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,57 +160,33 @@ export default function TargetingPage() {
     <div className="p-6 space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold">Duyệt đối tượng vào khảo sát</h1>
-        <p className="text-sm text-gray-600">
-          Chọn nhóm đối tượng, áp bộ lọc rồi tick những người cần mời. Sau đó soạn email và gửi lời mời/nhắc.
-        </p>
+        <p className="text-sm text-gray-600">Chọn nhóm đối tượng, lọc và gửi thư mời/nhắc tham gia khảo sát.</p>
       </div>
 
       {/* Chọn vai trò */}
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="role"
-            value="lecturer"
-            checked={role === 'lecturer'}
-            onChange={() => setRole('lecturer')}
-          />
+          <input type="radio" name="role" value="lecturer" checked={role === 'lecturer'} onChange={() => setRole('lecturer')} />
           <span>Giảng viên</span>
         </label>
         <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="role"
-            value="student"
-            checked={role === 'student'}
-            onChange={() => setRole('student')}
-          />
+          <input type="radio" name="role" value="student" checked={role === 'student'} onChange={() => setRole('student')} />
           <span>Sinh viên</span>
         </label>
         <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="role"
-            value="support"
-            checked={role === 'support'}
-            onChange={() => setRole('support')}
-          />
+          <input type="radio" name="role" value="support" checked={role === 'support'} onChange={() => setRole('support')} />
           <span>Bộ phận hỗ trợ</span>
         </label>
 
         <div className="ml-auto text-sm text-gray-500">
-          Survey ID:&nbsp;<code>{surveyId || '(chưa có)'}</code>
+          Survey ID: <code>{surveyId || '(chưa có)'}</code>
         </div>
       </div>
 
       {/* Bộ lọc */}
       <div className="flex flex-wrap gap-3">
         {role === 'lecturer' && (
-          <select
-            className="border rounded px-3 py-2"
-            value={dept}
-            onChange={(e) => setDept(e.target.value)}
-          >
+          <select className="border rounded px-3 py-2" value={dept} onChange={(e) => setDept(e.target.value)}>
             <option value="">— Chọn bộ môn —</option>
             {departments.map((d) => (
               <option key={d} value={d}>
@@ -201,13 +195,8 @@ export default function TargetingPage() {
             ))}
           </select>
         )}
-
         {role === 'student' && (
-          <select
-            className="border rounded px-3 py-2"
-            value={cohort}
-            onChange={(e) => setCohort(e.target.value)}
-          >
+          <select className="border rounded px-3 py-2" value={cohort} onChange={(e) => setCohort(e.target.value)}>
             <option value="">— Chọn khung CTĐT —</option>
             {cohorts.map((c) => (
               <option key={c} value={c}>
@@ -216,13 +205,8 @@ export default function TargetingPage() {
             ))}
           </select>
         )}
-
         {role === 'support' && (
-          <select
-            className="border rounded px-3 py-2"
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-          >
+          <select className="border rounded px-3 py-2" value={unit} onChange={(e) => setUnit(e.target.value)}>
             <option value="">— Chọn đơn vị —</option>
             {units.map((u) => (
               <option key={u} value={u}>
@@ -233,18 +217,15 @@ export default function TargetingPage() {
         )}
       </div>
 
-      {/* Bảng chọn đối tượng */}
+      {/* Bảng danh sách */}
       <div className="border rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="font-medium">
-            Danh sách ({rows.length}) • Đã chọn {selectedCount}
-          </div>
+          <div className="font-medium">Danh sách ({rows.length}) • Đã chọn {selectedCount}</div>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" checked={selectAll} onChange={toggleAll} />
             <span>Chọn tất cả</span>
           </label>
         </div>
-
         <div className="overflow-auto">
           <table className="min-w-[640px] w-full border-collapse">
             <thead>
@@ -259,11 +240,7 @@ export default function TargetingPage() {
               {rows.map((p) => (
                 <tr key={p.id} className="border-b hover:bg-gray-50">
                   <td className="py-2 pr-3">
-                    <input
-                      type="checkbox"
-                      checked={!!selected[p.id]}
-                      onChange={() => toggleOne(p.id)}
-                    />
+                    <input type="checkbox" checked={!!selected[p.id]} onChange={() => toggleOne(p.id)} />
                   </td>
                   <td className="py-2 pr-3">{p.name}</td>
                   <td className="py-2 pr-3">{p.email}</td>
@@ -282,7 +259,7 @@ export default function TargetingPage() {
         </div>
       </div>
 
-      {/* Soạn email mời/nhắc */}
+      {/* Soạn email */}
       <div className="border rounded-lg p-4 space-y-3">
         <div className="font-medium">Soạn email mời/nhắc</div>
         <textarea
@@ -300,12 +277,10 @@ export default function TargetingPage() {
           {loading ? 'Đang gửi…' : 'Gửi email cho mục đã chọn'}
         </button>
         <div className="text-xs text-gray-500">
-          Email sẽ gửi qua endpoint <code>/api/qa/surveys/[id]/send-invites</code> theo cấu hình SMTP/Resend của bạn.
+          Gửi qua endpoint <code>/api/qa/surveys/[id]/send-invites</code>, cấu hình SMTP/Resend ở ENV.
         </div>
         {toast && (
-          <div className={`mt-2 text-sm ${toast.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-            {toast.text}
-          </div>
+          <div className={`mt-2 text-sm ${toast.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{toast.text}</div>
         )}
       </div>
     </div>
