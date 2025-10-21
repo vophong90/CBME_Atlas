@@ -22,7 +22,6 @@ export default function LoginPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Nếu đã đăng nhập thì chuyển vào app
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) router.replace('/');
@@ -36,11 +35,6 @@ export default function LoginPage() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
       if (error) throw error;
-      if (!remember) {
-        // ép session chỉ trong memory: xoá khỏi storage sau login (tuỳ chiến lược)
-        // Ở client Supabase v2 không có toggle persistent chính thức;
-        // bạn có thể tuỳ biến: sign-in xong -> store token in-memory app state (phức tạp).
-      }
       router.replace('/');
     } catch (e: any) {
       setErr(e?.message ?? 'Đăng nhập thất bại');
@@ -52,10 +46,7 @@ export default function LoginPage() {
   async function onForgot() {
     setErr(null);
     setNotice(null);
-    if (!email) {
-      setErr('Nhập email để nhận liên kết đặt lại mật khẩu.');
-      return;
-    }
+    if (!email) { setErr('Nhập email để nhận liên kết đặt lại mật khẩu.'); return; }
     try {
       setLoading(true);
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -71,15 +62,15 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen grid md:grid-cols-2 bg-gradient-to-br from-slate-50 to-white">
+    <div className="min-h-screen grid md:grid-cols-2 bg-gradient-to-br from-brand-50 to-white">
       {/* Left visual */}
-      <div className="hidden md:flex items-center justify-center p-10 bg-slate-900 text-white">
+      <div className="hidden md:flex items-center justify-center p-10 bg-gradient-to-br from-brand-700 to-brand-600 text-white">
         <div className="max-w-md">
           <div className="text-3xl font-semibold">Chào mừng đến CBME Atlas</div>
-          <p className="mt-3 text-slate-300">
+          <p className="mt-3 text-white/80">
             Đăng nhập để quản lý chương trình, khảo sát chất lượng, và theo dõi kết quả theo thời gian thực.
           </p>
-          <ul className="mt-6 space-y-2 text-sm text-slate-300">
+          <ul className="mt-6 space-y-2 text-sm text-white/80">
             <li>• Single workspace cho giảng viên & QA</li>
             <li>• Báo cáo trực quan & xuất dữ liệu</li>
             <li>• Bảo mật theo vai trò (RBAC)</li>
@@ -91,7 +82,7 @@ export default function LoginPage() {
       <div className="flex items-center justify-center p-6">
         <div className="w-full max-w-md">
           <div className="mb-8">
-            <div className="h-12 w-12 grid place-items-center rounded-2xl bg-slate-900 text-white">AT</div>
+            <div className="h-12 w-12 grid place-items-center rounded-2xl bg-brand-600 text-white">AT</div>
             <h1 className="mt-4 text-2xl font-semibold">Đăng nhập</h1>
             <p className="text-sm text-slate-600">Sử dụng tài khoản được cấp bởi Quản trị hệ thống.</p>
           </div>
@@ -105,7 +96,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:ring"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
                   placeholder="you@university.edu"
                 />
                 <Mail className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
@@ -120,13 +111,13 @@ export default function LoginPage() {
                   value={pw}
                   onChange={(e) => setPw(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:ring"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-500 hover:bg-slate-100"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-500 hover:bg-brand-50"
                   aria-label={showPw ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                 >
                   {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
@@ -139,18 +130,22 @@ export default function LoginPage() {
                 <input type="checkbox" className="h-4 w-4" checked={remember} onChange={(e)=>setRemember(e.target.checked)} />
                 Ghi nhớ đăng nhập
               </label>
-              <button type="button" onClick={onForgot} className="text-sm text-slate-700 underline hover:opacity-80">
+              <button type="button" onClick={onForgot} className="text-sm text-brand-700 hover:text-brand-800 underline">
                 Quên mật khẩu?
               </button>
             </div>
 
-            {err && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
-            {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
+            {err && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>
+            )}
+            {notice && (
+              <div className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-700">{notice}</div>
+            )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl bg-slate-900 px-3 py-2 text-white hover:opacity-95 active:scale-[0.99] disabled:opacity-50"
+              className="w-full rounded-xl bg-brand-600 px-3 py-2 text-white hover:bg-brand-700 active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? 'Đang xử lý...' : 'Đăng nhập'}
             </button>
