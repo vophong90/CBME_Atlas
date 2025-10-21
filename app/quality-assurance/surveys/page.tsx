@@ -1,73 +1,208 @@
-'use client'
-<option value="active">active</option>
-</select>
-</div>
-</div>
-<div>
-<label className="text-sm">Giới thiệu & hướng dẫn</label>
-<textarea className="w-full border rounded p-2" rows={4} value={editing.intro ?? ''} onChange={(e)=>setEditing({...editing!, intro: e.target.value})} />
-</div>
-<div className="flex gap-2">
-<button onClick={saveMeta} className="px-3 py-2 bg-black text-white rounded">Lưu thông tin</button>
-</div>
+'use client';
 
+import React, { useEffect, useMemo, useState } from 'react';
+import { getSupabase } from '@/lib/supabase-browser';
 
-<div className="pt-4 border-t">
-<div className="flex items-center justify-between mb-2">
-<div className="font-medium">Câu hỏi</div>
-<div className="flex gap-2">
-<button onClick={()=>addQ('single')} className="px-2 py-1 border rounded">+ Single</button>
-<button onClick={()=>addQ('multi')} className="px-2 py-1 border rounded">+ Multi</button>
-<button onClick={()=>addQ('text')} className="px-2 py-1 border rounded">+ Text</button>
-<button onClick={saveQs} className="px-3 py-1 bg-black text-white rounded">Lưu câu hỏi</button>
-</div>
-</div>
-<div className="space-y-3">
-{questions.map((q, idx)=> (
-<div key={q.id ?? `new-${idx}`} className="border rounded p-3">
-<div className="grid md:grid-cols-6 gap-2 items-center">
-<div className="col-span-1">
-<label className="text-xs">Thứ tự</label>
-<input type="number" className="w-full border rounded p-2" value={q.order_no} onChange={(e)=>{
-const v = parseInt(e.target.value||'0',10); setQuestions(prev=>prev.map((x,i)=>i===idx?{...x, order_no:v}:x))
-}} />
-</div>
-<div className="col-span-3">
-<label className="text-xs">Nội dung</label>
-<input className="w-full border rounded p-2" value={q.label} onChange={(e)=>setQuestions(prev=>prev.map((x,i)=>i===idx?{...x, label:e.target.value}:x))} />
-</div>
-<div>
-<label className="text-xs">Loại</label>
-<select className="w-full border rounded p-2" value={q.type} onChange={(e)=>setQuestions(prev=>prev.map((x,i)=>i===idx?{...x, type:e.target.value as any}:x))}>
-<option value="single">single</option>
-<option value="multi">multi</option>
-<option value="text">text</option>
-</select>
-</div>
-<div>
-<label className="text-xs">Bắt buộc</label>
-<input type="checkbox" className="ml-2" checked={!!q.required} onChange={(e)=>setQuestions(prev=>prev.map((x,i)=>i===idx?{...x, required:e.target.checked}:x))} />
-</div>
-</div>
-{q.type !== 'text' && (
-<div className="mt-2">
-<label className="text-xs">Tuỳ chọn (mỗi dòng một giá trị|nhãn)</label>
-<textarea className="w-full border rounded p-2" rows={3}
-value={Array.isArray(q.options)? q.options.map((o:any)=>`${o.value}|${o.label}`).join('\n'):''}
-onChange={(e)=>{
-const opts = e.target.value.split('\n').filter(Boolean).map(line=>{
-const [value,label] = line.split('|'); return { value: (value??'').trim(), label: (label??value??'').trim() }
-})
-setQuestions(prev=>prev.map((x,i)=>i===idx?{...x, options:opts}:x))
-}} />
-</div>
-)}
-</div>
-))}
-</div>
-</div>
-</div>
-)}
-</div>
-)
+type SurveyRow = {
+  id: string;
+  title: string;
+  intro: string | null;
+  guide: string | null;
+  status: 'draft' | 'active' | 'inactive' | 'archived';
+  created_at: string;
+  updated_at: string;
+};
+
+const statusOptions: SurveyRow['status'][] = ['draft', 'active', 'inactive', 'archived'];
+
+export default function SurveysPage() {
+  const supabase = getSupabase();
+
+  const [list, setList] = useState<SurveyRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const [title, setTitle] = useState('');
+  const [intro, setIntro] = useState('');
+  const [guide, setGuide] = useState('');
+  const [status, setStatus] = useState<SurveyRow['status']>('draft');
+
+  async function load() {
+    setLoading(true);
+    setToast(null);
+    try {
+      const { data, error } = await supabase
+        .from('surveys')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setList((data ?? []) as SurveyRow[]);
+    } catch (e: any) {
+      setToast({ type: 'error', text: e.message ?? 'Không tải được danh sách' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function createSurvey() {
+    if (!title.trim()) {
+      setToast({ type: 'error', text: 'Thiếu tiêu đề khảo sát' });
+      return;
+    }
+    setLoading(true);
+    setToast(null);
+    try {
+      const { error } = await supabase.from('surveys').insert([
+        {
+          title: title.trim(),
+          intro: intro || null,
+          guide: guide || null,
+          status,
+          // created_by DEFAULT auth.uid() (đã set trong DDL)
+        },
+      ]);
+      if (error) throw error;
+      setTitle(''); setIntro(''); setGuide(''); setStatus('draft');
+      await load();
+      setToast({ type: 'success', text: 'Đã tạo khảo sát' });
+    } catch (e: any) {
+      setToast({ type: 'error', text: e.message ?? 'Tạo khảo sát thất bại' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updateStatus(id: string, st: SurveyRow['status']) {
+    setLoading(true);
+    setToast(null);
+    try {
+      const { error } = await supabase.from('surveys').update({ status: st }).eq('id', id);
+      if (error) throw error;
+      await load();
+      setToast({ type: 'success', text: 'Đã cập nhật trạng thái' });
+    } catch (e: any) {
+      setToast({ type: 'error', text: e.message ?? 'Cập nhật thất bại' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto p-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Khảo sát</h1>
+        <p className="text-sm text-gray-600">Tạo khảo sát mới và quản lý trạng thái.</p>
+      </div>
+
+      {/* Form tạo mới */}
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="grid md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm">Tiêu đề *</label>
+            <input
+              className="w-full border rounded px-3 py-2"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="VD: Khảo sát chất lượng môn học"
+            />
+          </div>
+          <div>
+            <label className="text-sm">Trạng thái</label>
+            <select
+              className="w-full border rounded px-3 py-2"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as SurveyRow['status'])}
+            >
+              {statusOptions.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="text-sm">Giới thiệu</label>
+          <textarea
+            className="w-full border rounded p-2"
+            rows={3}
+            value={intro}
+            onChange={(e) => setIntro(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="text-sm">Hướng dẫn</label>
+          <textarea
+            className="w-full border rounded p-2"
+            rows={4}
+            value={guide}
+            onChange={(e) => setGuide(e.target.value)}
+          />
+        </div>
+        <button
+          onClick={createSurvey}
+          disabled={loading}
+          className={`px-3 py-2 rounded text-white ${loading ? 'bg-gray-400' : 'bg-black'}`}
+        >
+          {loading ? 'Đang lưu…' : 'Tạo khảo sát'}
+        </button>
+        {toast && (
+          <div className={`text-sm ${toast.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+            {toast.text}
+          </div>
+        )}
+      </div>
+
+      {/* Danh sách */}
+      <div className="border rounded-lg p-4">
+        <div className="font-medium mb-2">Danh sách khảo sát</div>
+        <div className="overflow-auto">
+          <table className="min-w-[720px] w-full border-collapse">
+            <thead>
+              <tr className="border-b text-left">
+                <th className="py-2 pr-3">Tiêu đề</th>
+                <th className="py-2 pr-3 w-36">Trạng thái</th>
+                <th className="py-2 pr-3 w-64">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((s) => (
+                <tr key={s.id} className="border-b">
+                  <td className="py-2 pr-3">{s.title}</td>
+                  <td className="py-2 pr-3">{s.status}</td>
+                  <td className="py-2 pr-3">
+                    <div className="flex gap-2">
+                      {statusOptions.map((o) => (
+                        <button
+                          key={o}
+                          className={`px-2 py-1 rounded border text-sm ${o === s.status ? 'bg-gray-200' : ''}`}
+                          onClick={() => updateStatus(s.id, o)}
+                          disabled={loading}
+                          title={`Đổi sang ${o}`}
+                        >
+                          {o}
+                        </button>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {list.length === 0 && (
+                <tr>
+                  <td className="py-6 text-center text-sm text-gray-500" colSpan={3}>
+                    Chưa có khảo sát nào.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
