@@ -1,27 +1,64 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import {
-  ClipboardList,
-  Users2,
-  Activity,
-  BarChart3,
-  ChevronLeft,
-  ChevronRight,
-  Menu,
-} from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
 
+/** ==== Minimal inline icons (no external deps) ==== */
+type IconProps = React.SVGProps<SVGSVGElement>;
+const MenuIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path strokeWidth={1.75} strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" />
+  </svg>
+);
+const ChevronLeftIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" d="M15 6l-6 6 6 6" />
+  </svg>
+);
+const ChevronRightIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+  </svg>
+);
+const ClipboardIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <rect x="7" y="4" width="10" height="16" rx="2" strokeWidth={1.75} />
+    <path d="M9 4h6M12 2v4" strokeWidth={1.75} strokeLinecap="round" />
+  </svg>
+);
+const UsersIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <circle cx="9" cy="8" r="3" strokeWidth={1.75} />
+    <path d="M2 20a7 7 0 0114 0" strokeWidth={1.75} strokeLinecap="round" />
+    <circle cx="17" cy="10" r="2" strokeWidth={1.75} />
+    <path d="M22 20a5 5 0 00-7-4" strokeWidth={1.75} strokeLinecap="round" />
+  </svg>
+);
+const ActivityIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M22 12h-4l-2 6-4-12-2 6H2" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+const BarChartIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M3 20h18" strokeWidth={1.75} strokeLinecap="round" />
+    <rect x="6" y="10" width="3" height="8" rx="1" strokeWidth={1.75} />
+    <rect x="11" y="6" width="3" height="12" rx="1" strokeWidth={1.75} />
+    <rect x="16" y="12" width="3" height="6" rx="1" strokeWidth={1.75} />
+  </svg>
+);
+
+/** ==== Nav config ==== */
 const NAV = [
-  { key: 'surveys',   label: 'Surveys',   href: '/quality-assurance/surveys',   icon: ClipboardList },
-  { key: 'targeting', label: 'Targeting', href: '/quality-assurance/targeting', icon: Users2 },
-  { key: 'progress',  label: 'Progress',  href: '/quality-assurance/progress',  icon: Activity },
-  { key: 'results',   label: 'Results',   href: '/quality-assurance/results',   icon: BarChart3 },
+  { key: 'surveys',   label: 'Surveys',   href: '/quality-assurance/surveys',   Icon: ClipboardIcon },
+  { key: 'targeting', label: 'Targeting', href: '/quality-assurance/targeting', Icon: UsersIcon },
+  { key: 'progress',  label: 'Progress',  href: '/quality-assurance/progress',  Icon: ActivityIcon },
+  { key: 'results',   label: 'Results',   href: '/quality-assurance/results',   Icon: BarChartIcon },
 ];
 
 export default function QALayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() || '';
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -46,7 +83,7 @@ export default function QALayout({ children }: { children: React.ReactNode }) {
           onClick={() => setMobileOpen(true)}
           className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 active:scale-95"
         >
-          <Menu className="h-5 w-5" />
+          <MenuIcon className="h-5 w-5" />
         </button>
         <div className="text-base font-semibold">Quality Assurance</div>
       </div>
@@ -69,14 +106,14 @@ export default function QALayout({ children }: { children: React.ReactNode }) {
               onClick={() => setCollapsed((v) => !v)}
               className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 hover:bg-slate-50 active:scale-95"
             >
-              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              {collapsed ? <ChevronRightIcon className="h-4 w-4" /> : <ChevronLeftIcon className="h-4 w-4" />}
             </button>
           </div>
+
           <nav className="flex-1 space-y-1 px-2 pb-3">
             {NAV.map((item) => {
-              const Icon = item.icon;
-              const active =
-                pathname === item.href || (pathname && pathname.startsWith(item.href + '/'));
+              const active = pathname === item.href || pathname.startsWith(item.href + '/');
+              const Icon = item.Icon;
               return (
                 <Link
                   key={item.key}
@@ -118,15 +155,13 @@ export default function QALayout({ children }: { children: React.ReactNode }) {
                   onClick={() => setMobileOpen(false)}
                   className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50 active:scale-95"
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeftIcon className="h-4 w-4" />
                 </button>
               </div>
               <nav className="space-y-1 px-2 pb-3">
                 {NAV.map((item) => {
-                  const Icon = item.icon;
-                  const active =
-                    pathname === item.href ||
-                    (pathname && pathname.startsWith(item.href + '/'));
+                  const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                  const Icon = item.Icon;
                   return (
                     <Link
                       key={item.key}
@@ -147,7 +182,7 @@ export default function QALayout({ children }: { children: React.ReactNode }) {
           </>
         )}
 
-        {/* Main content */}
+        {/* Content */}
         <main className="flex-1">{children}</main>
       </div>
     </div>
