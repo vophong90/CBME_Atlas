@@ -31,13 +31,13 @@ export default function Fill360Page() {
   }, [id, router]);
 
   const rows: ItemRow[] = useMemo(() => rubric?.definition?.rows || [], [rubric]);
-  const cols: Column[]   = useMemo(() => rubric?.definition?.columns || [], [rubric]);
+  const cols: Column[] = useMemo(() => rubric?.definition?.columns || [], [rubric]);
 
   function setLevel(rowId: string, key: string) {
-    setItems(s => ({ ...s, [rowId]: { ...(s[rowId]||{}), selected_level: key } }));
+    setItems(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), selected_level: key } }));
   }
   function setComment(rowId: string, v: string) {
-    setItems(s => ({ ...s, [rowId]: { ...(s[rowId]||{}), comment: v } }));
+    setItems(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), comment: v } }));
   }
 
   async function submit() {
@@ -48,23 +48,41 @@ export default function Fill360Page() {
         item_key,
         selected_level: v.selected_level,
         score: typeof v.score === 'number' ? v.score : null,
-        comment: v.comment || null
-      }))
+        comment: v.comment || null,
+      })),
     };
-    const r = await fetch('/api/360/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const r = await fetch('/api/360/submit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
     const d = await r.json();
     if (!r.ok) { alert(d.error || 'Gửi thất bại'); return; }
     alert('Đã gửi đánh giá. Cảm ơn bạn!');
     router.push('/360-eval');
   }
 
-  if (loading) return <div className="max-w-4xl mx-auto p-6 text-sm text-gray-500">Đang tải…</div>;
+  if (loading) {
+    return (
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="text-sm text-gray-500">Đang tải…</div>
+      </section>
+    );
+  }
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-4">
-      <h1 className="text-xl font-semibold">Phiếu đánh giá 360°</h1>
-      <div className="text-sm text-gray-600">
-        {rubric?.name} {request ? `• Nhóm: ${request.group_code}` : ''}
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Phiếu đánh giá 360°</h2>
+          <div className="text-sm text-slate-600">
+            {rubric?.name} {request ? <>• Nhóm: {request.group_code}</> : null}
+          </div>
+        </div>
+        <button
+          onClick={() => history.back()}
+          className="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
+        >
+          ← Quay lại
+        </button>
       </div>
 
       <div className="space-y-4">
@@ -72,13 +90,14 @@ export default function Fill360Page() {
           <div key={row.id} className="border rounded-xl p-3">
             <div className="font-medium">{row.label}</div>
             <div className="mt-2 flex flex-wrap gap-3">
-              {cols.map(c => (
+              {cols.map((c) => (
                 <label key={c.key} className="inline-flex items-center gap-2 text-sm">
                   <input
                     type="radio"
                     name={`row_${row.id}`}
+                    className="accent-brand-600"
                     checked={items[row.id]?.selected_level === c.key}
-                    onChange={()=>setLevel(row.id, c.key)}
+                    onChange={() => setLevel(row.id, c.key)}
                   />
                   <span>{c.label}</span>
                 </label>
@@ -88,7 +107,7 @@ export default function Fill360Page() {
               placeholder="Nhận xét (lịch sự, xây dựng — bình luận không phù hợp sẽ bị chặn)"
               className="mt-2 w-full border rounded-lg p-2 text-sm"
               value={items[row.id]?.comment || ''}
-              onChange={e=>setComment(row.id, e.target.value)}
+              onChange={(e) => setComment(row.id, e.target.value)}
             />
             {row.clo_ids?.length ? (
               <div className="mt-2 text-xs text-gray-500">Liên quan CLO: {row.clo_ids.join(', ')}</div>
@@ -102,13 +121,18 @@ export default function Fill360Page() {
           className="w-full border rounded-lg p-2"
           placeholder="Nhận xét tổng quan (khuyến khích góp ý cụ thể, tích cực)"
           value={overall}
-          onChange={e=>setOverall(e.target.value)}
+          onChange={(e) => setOverall(e.target.value)}
         />
       </div>
 
       <div className="flex gap-2">
-        <button className="px-4 py-2 rounded-lg border bg-gray-100" onClick={submit}>Gửi</button>
+        <button
+          className="px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700"
+          onClick={submit}
+        >
+          Gửi đánh giá
+        </button>
       </div>
-    </div>
+    </section>
   );
 }
