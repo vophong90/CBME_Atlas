@@ -21,11 +21,39 @@ const ChevronRight = (p: any) => (
   </svg>
 );
 
+/* Simple inline icons */
+const ClipboardCheck = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <rect x="6" y="4" width="12" height="16" rx="2" />
+    <path d="M9 4h6v3H9z" />
+    <path d="M8 11h5" />
+    <path d="M8 15h8" />
+    <path d="M14 10l2 2 3-3" />
+  </svg>
+);
+const GraduationCap = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M12 3l9 5-9 5-9-5 9-5z" />
+    <path d="M12 13v7" />
+    <path d="M7 15c1.5 1 3.5 1.5 5 1.5S15.5 16 17 15v4c-1.5 1-3.5 1.5-5 1.5S8.5 20 7 19v-4z" />
+  </svg>
+);
+const MessageSquare = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" />
+  </svg>
+);
+const InboxIcon = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M4 4h16l-2 10h-4l-2 3-2-3H6L4 4z" />
+  </svg>
+);
+
 const NAV = [
-  { href: '/teacher/evaluate', label: 'Đánh giá', desc: 'Chấm theo Rubric' },
-  { href: '/teacher/student', label: 'Thông tin SV', desc: 'Tra cứu & CLO chưa đạt' },
-  { href: '/teacher/feedback', label: 'Phản hồi (GV → SV)', desc: 'Gợi ý cải thiện' },
-  { href: '/teacher/inbox', label: 'Hộp thư góp ý', desc: 'Ẩn danh từ SV' },
+  { href: '/teacher/evaluate', label: 'Đánh giá', desc: 'Chấm theo Rubric', Icon: ClipboardCheck },
+  { href: '/teacher/student',  label: 'Thông tin SV', desc: 'Tra cứu & CLO chưa đạt', Icon: GraduationCap },
+  { href: '/teacher/feedback', label: 'Phản hồi (GV → SV)', desc: 'Gợi ý cải thiện', Icon: MessageSquare },
+  { href: '/teacher/inbox',    label: 'Hộp thư góp ý', desc: 'Ẩn danh từ SV', Icon: InboxIcon },
 ];
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -70,32 +98,35 @@ function Shell({ children }: { children: React.ReactNode }) {
               {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
+
           <nav className="flex-1 space-y-1 px-2 pb-3">
-            {NAV.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(item.href + '/');
+            {NAV.map(({ href, label, desc, Icon }) => {
+              const active = pathname === href || pathname.startsWith(href + '/');
               return (
                 <Link
-                  key={item.href}
-                  href={item.href}
+                  key={href}
+                  href={href}
+                  aria-current={active ? 'page' : undefined}
                   className={[
                     'group relative flex items-center rounded-xl px-2 py-2 transition',
                     active ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-brand-50',
                   ].join(' ')}
                 >
-                  <div className="mr-2 h-5 w-5 rounded bg-slate-200" /> {/* placeholder icon */}
+                  <Icon className={['mr-2 h-5 w-5', active ? 'text-white' : 'text-slate-500'].join(' ')} />
                   <div className={collapsed ? 'sr-only' : 'min-w-0'}>
-                    <div className="truncate text-sm font-medium">{item.label}</div>
-                    <div className="truncate text-xs text-slate-500">{item.desc}</div>
+                    <div className="truncate text-sm font-medium">{label}</div>
+                    <div className={['truncate text-xs', active ? 'text-white/80' : 'text-slate-500'].join(' ')}>{desc}</div>
                   </div>
                   {collapsed && (
                     <span className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-brand-700 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition group-hover:opacity-100">
-                      {item.label}
+                      {label}
                     </span>
                   )}
                 </Link>
               );
             })}
           </nav>
+
           <div className="border-t p-3 text-center text-xs text-slate-500">CBME Atlas · Teacher</div>
         </aside>
 
@@ -114,20 +145,20 @@ function Shell({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
               <nav className="space-y-1 px-2 pb-3">
-                {NAV.map((item) => {
-                  const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                {NAV.map(({ href, label, Icon }) => {
+                  const active = pathname === href || pathname.startsWith(href + '/');
                   return (
                     <Link
-                      key={item.href}
-                      href={item.href}
+                      key={href}
+                      href={href}
                       onClick={() => setMobileOpen(false)}
                       className={[
                         'flex items-center rounded-xl px-2 py-2 transition',
                         active ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-brand-50',
                       ].join(' ')}
                     >
-                      <div className="mr-2 h-5 w-5 rounded bg-slate-200" />
-                      <span className="text-sm font-medium">{item.label}</span>
+                      <Icon className={['mr-2 h-5 w-5', active ? 'text-white' : 'text-slate-500'].join(' ')} />
+                      <span className="text-sm font-medium">{label}</span>
                     </Link>
                   );
                 })}
