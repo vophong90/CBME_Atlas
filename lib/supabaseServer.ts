@@ -2,46 +2,43 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
-// ---- ENV (đọc mỗi lần dùng để tránh lỗi khi build) -------------------------
+// -------- ENV helpers -------------------------------------------------------
 function requireEnv(name: string): string {
   const v = process.env[name];
-  if (!v) {
-    // Không throw khi import; chỉ throw khi thực sự cần dùng
-    throw new Error(`Missing env: ${name}`);
-  }
+  if (!v) throw new Error(`Missing env: ${name}`);
   return v;
 }
 
-// ---- Helpers đọc access token từ cookie (để áp RLS) ------------------------
+// -------- Read access token from cookies (for RLS-aware server client) ------
 function readAccessTokenFromCookies(): string | null {
   const store = cookies();
 
-  // 1) Cookie chuẩn của Supabase v2
-  const sbAccess = store.get('sb-access-token')?.value;
-  if (sbAccess) return sbAccess;
+  // 1) Supabase v2 cookie
+  const sb = store.get('sb-access-token')?.value;
+  if (sb) return sb;
 
-  // 2) Auth Helpers: "supabase-auth-token" chứa JSON ["access_token","refresh_token"]
-  const pairJson = store.get('supabase-auth-token')?.value;
-  if (pairJson) {
+  // 2) Auth Helpers cookie: 'supabase-auth-token' = JSON ["access","refresh"]
+  const helpers = store.get('supabase-auth-token')?.value;
+  if (helpers) {
     try {
-      const arr = JSON.parse(pairJson);
+      const arr = JSON.parse(helpers);
       if (Array.isArray(arr) && typeof arr[0] === 'string') return arr[0];
-    } catch { /* ignore */ }
+    } catch {}
   }
 
-  // 3) Một số cấu hình cũ (legacy): "sb:token" là JSON có access_token
+  // 3) Legacy cookie: 'sb:token' = { access_token, refresh_token }
   const legacy = store.get('sb:token')?.value;
   if (legacy) {
     try {
       const obj = JSON.parse(legacy);
       if (obj && typeof obj.access_token === 'string') return obj.access_token;
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   return null;
 }
 
-// ---- Admin client (service-role) — bypass RLS ------------------------------
+// -------- Admin client (service role) — bypass RLS --------------------------
 export function createServiceClient(): SupabaseClient {
   const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
   const serviceKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
@@ -50,19 +47,19 @@ export function createServiceClient(): SupabaseClient {
   });
 }
 
-// Giữ sẵn 1 singleton admin nếu bạn thích dùng trực tiếp
-export const supabaseAdmin: SupabaseClient = (() => {
+/**
+ * Optional singleton admin client.
+ * Có thể là `undefined` ở build-time nếu thiếu ENV; code gọi cần kiểm tra tồn tại.
+ */
+export const supabaseAdmin: SupabaseClient | undefined = (() => {
   try {
     return createServiceClient();
   } catch {
-    // Tránh throw khi import ở môi trường chưa có ENV (ví dụ build time).
-    // Khi gọi thực tế mà thiếu ENV, createServiceClient() phía trên sẽ throw rõ ràng.
-    // @ts-ignore
     return undefined;
   }
 })();
 
-// ---- Server client theo user hiện tại (áp RLS) -----------------------------
+// -------- Server client theo user hiện tại (RLS bật) ------------------------
 export function getSupabase(): SupabaseClient {
   const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
   const anonKey = requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
@@ -77,7 +74,5 @@ export function getSupabase(): SupabaseClient {
   });
 }
 
-// Alias để tương thích code cũ: nhiều nơi import createServerClient
-export function createServerClient(): SupabaseClient {
-  return getSupabase();
-}
+// Alias để tương thích code cũ
+export const createServerClient = getSupabase;
