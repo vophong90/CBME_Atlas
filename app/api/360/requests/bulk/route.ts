@@ -1,36 +1,46 @@
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseServer';
-
+// app/api/360/requests/bulk/route.ts
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * POST body:
- * {
- *   campaign_id: number,
- *   evaluatee_user_id: string,
- *   evaluator_user_ids: string[],   // user_id của người chấm
- *   group_code: 'peer'|'faculty'|'supervisor'|'self',
- *   expires_at?: string
- * }
- */
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabaseServer';
+
+type AnyObject = Record<string, any>;
+
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { campaign_id, evaluatee_user_id, evaluator_user_ids, group_code, expires_at } = body;
+  const db = createServiceClient(); // luôn là SupabaseClient (nếu thiếu ENV sẽ throw → rơi vào catch)
 
-  if (!campaign_id || !evaluatee_user_id || !Array.isArray(evaluator_user_ids) || !group_code) {
-    return NextResponse.json({ error: 'campaign_id, evaluatee_user_id, evaluator_user_ids[], group_code required' }, { status: 400 });
+  try {
+    const body = (await req.json().catch(() => null)) as AnyObject | null;
+    if (!body) {
+      return NextResponse.json({ error: 'Missing JSON body' }, { status: 400 });
+    }
+
+    // Chấp nhận nhiều tên trường để linh hoạt: rows | items | requests
+    let rows: any[] =
+      (Array.isArray(body.rows) && body.rows) ||
+      (Array.isArray(body.items) && body.items) ||
+      (Array.isArray(body.requests) && body.requests) ||
+      [];
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return NextResponse.json({ error: 'No rows to insert' }, { status: 400 });
+    }
+
+    // (Tuỳ yêu cầu) bạn có thể map/chuẩn hoá dữ liệu ở đây
+    // rows = rows.map(r => ({ ...r, created_at: new Date().toISOString() }))
+
+    const { data, error } = await db
+      .from('evaluation_requests')
+      .insert(rows)
+      .select('*');
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ items: data ?? [] });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
   }
-
-  const rows = evaluator_user_ids.map((uid: string) => ({
-    campaign_id,
-    evaluatee_user_id,
-    evaluator_user_id: uid,
-    group_code,
-    status: 'pending',
-    expires_at: expires_at ?? null
-  }));
-
-  const { data, error } = await supabaseAdmin.from('evaluation_requests').insert(rows).select();
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ items: data });
 }
