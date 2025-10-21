@@ -13,18 +13,18 @@ const ABOUT: Record<
   mission: {
     title: 'Sứ mạng',
     text:
-      'Đào tạo nguồn nhân lực Y học cổ truyền chất lượng cao; nghiên cứu khoa học, ứng dụng và chuyển giao các kỹ thuật trong lĩnh vực Y học cổ truyền kết hợp Y học hiện đại, đóng góp hiệu quả vào sự nghiệp bảo vệ, chăm sóc và nâng cao sức khỏe nhân dân.',
+      'Đào tạo nguồn nhân lực y tế chất lượng cao và chuyên gia hàng đầu dẫn dắt, lãnh đạo trong lĩnh vực y dược cổ truyền kết hợp y dược hiện đại; Kế thừa, phát triển tinh hoa y dược cổ truyền, đóng góp vào thành tựu khoa học, tri thức nhân loại; Phát triển tinh thần phụng sự cộng đồng.',
     colors: { from: '#EEF7FF', to: '#FFFFFF', border: '#BADBFF', accent: '#0E7BD0', text: '#0b253a' },
   },
   vision: {
     title: 'Tầm nhìn',
     text:
-      'Phát triển thành trường chuyên ngành Y học cổ truyền hàng đầu Việt Nam, với chương trình giảng dạy và nghiên cứu khoa học về Y học cổ truyền kết hợp Y học hiện đại ngang tầm các đại học trong khu vực Châu Á – Thái Bình Dương.',
+      'Trở thành cơ sở giáo dục hàng đầu Việt Nam về lĩnh vực y dược cổ truyền với chương trình đào tạo đạt chuẩn quốc tế và đáp ứng nhu cầu xã hội.',
     colors: { from: '#EFFAF3', to: '#FFFFFF', border: '#B5E6C9', accent: '#228C5C', text: '#0c3326' },
   },
   values: {
     title: 'Giá trị cốt lõi',
-    text: 'Chuyên nghiệp • Chất lượng • Năng động • Sáng tạo.',
+    text: 'Chuyên nghiệp – Kế thừa – Sáng tạo – Hội nhập – Nhân văn',
     colors: { from: '#FFFAE8', to: '#FFFFFF', border: '#FFE58A', accent: '#F59F00', text: '#4a3000' },
   },
   philosophy: {
@@ -275,8 +275,8 @@ const CARD_ITEMS = [
     badgeText: '#0E7BD0',
   },
   {
-    href: '/qa',
-    title: 'Đảm bảo chất lượng',
+    href: '/quality-assurance',
+    title: 'QAs',
     desc: 'Chuẩn đầu ra, minh chứng, báo cáo CBME',
     icon: '✅',
     iconBg: 'linear-gradient(135deg,#EAF7EC,#FFFFFF)',
@@ -298,7 +298,7 @@ const CARD_ITEMS = [
   },
   {
     href: '/360-eval',
-    title: 'Đánh giá đa nguồn',
+    title: 'Đánh giá 360',
     desc: 'SV – GV – Đồng nghiệp – Người hướng dẫn – Tự đánh giá',
     icon: '📊',
     iconBg: 'linear-gradient(135deg,#FFF0F6,#FFFFFF)',
