@@ -1,61 +1,313 @@
-'use client'
-</div>
-)}
-{role==='support' && (
-<div>
-<label className="text-sm">Đơn vị</label>
-<select className="w-full border rounded p-2" value={unitId} onChange={(e)=>setUnitId(e.target.value)}>
-<option value="">—</option>
-{units.map((u)=> <option key={u.id} value={u.id}>{u.name}</option>)}
-</select>
-</div>
-)}
-<div>
-<label className="text-sm">Khảo sát</label>
-<select className="w-full border rounded p-2" value={surveyId} onChange={(e)=>setSurveyId(e.target.value)}>
-<option value="">—</option>
-{surveys.map((s)=> <option key={s.id} value={s.id}>{s.title} ({s.status})</option>)}
-</select>
-</div>
-<div>
-<button onClick={load} className="mt-6 px-3 py-2 border rounded">Tải danh sách</button>
-</div>
-</div>
+'use client';
 
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
-<div className="flex items-center gap-3">
-<button className="px-3 py-2 border rounded" onClick={()=>toggleAll(true)}>Chọn tất cả</button>
-<button className="px-3 py-2 border rounded" onClick={()=>toggleAll(false)}>Bỏ chọn</button>
-<button className="px-3 py-2 bg-black text-white rounded" onClick={assign}>Gán vào khảo sát</button>
-</div>
+type Role = 'lecturer' | 'student' | 'support';
 
+type Person = {
+  id: string;
+  name: string;
+  email: string;
+  extra?: string; // Bộ môn / Khung CTĐT / Đơn vị
+};
 
-<div className="overflow-auto border rounded-lg">
-<table className="min-w-[800px] text-sm">
-<thead>
-<tr>
-<th className="px-3 py-2 border-b"><input type="checkbox" onChange={(e)=>toggleAll(e.target.checked)} /></th>
-<th className="px-3 py-2 border-b text-left">Họ tên</th>
-<th className="px-3 py-2 border-b text-left">Email</th>
-<th className="px-3 py-2 border-b text-left">Vai trò</th>
-<th className="px-3 py-2 border-b text-left">Đơn vị/Bộ môn</th>
-<th className="px-3 py-2 border-b text-left">Khung CT</th>
-</tr>
-</thead>
-<tbody>
-{participants.map((p)=> (
-<tr key={p.user_id} className="odd:bg-white even:bg-gray-50">
-<td className="px-3 py-2 border-b"><input type="checkbox" checked={!!checked[p.user_id]} onChange={(e)=>setChecked(prev=>({ ...prev, [p.user_id]: e.target.checked }))} /></td>
-<td className="px-3 py-2 border-b">{p.user_name}</td>
-<td className="px-3 py-2 border-b">{p.user_email}</td>
-<td className="px-3 py-2 border-b">{p.role}</td>
-<td className="px-3 py-2 border-b">{p.department_name || p.unit_name || '—'}</td>
-<td className="px-3 py-2 border-b">{p.framework_code || '—'}</td>
-</tr>
-))}
-</tbody>
-</table>
-</div>
-</div>
-)
+export default function TargetingPage() {
+  const searchParams = useSearchParams();
+  const surveyId = searchParams.get('surveyId') ?? ''; // truyền ?surveyId=... khi mở trang
+
+  const [role, setRole] = useState<Role>('lecturer');
+  const [dept, setDept] = useState<string>('');        // Bộ môn (lecturer)
+  const [cohort, setCohort] = useState<string>('');    // Khung CTĐT (student)
+  const [unit, setUnit] = useState<string>('');        // Đơn vị (support)
+
+  const [people, setPeople] = useState<Person[]>([]);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [selectAll, setSelectAll] = useState(false);
+
+  const [message, setMessage] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Demo options (thay bằng fetch thật khi có API)
+  const departments = ['YHCT Nội', 'YHCT Ngoại', 'Châm cứu', 'Dược cổ truyền'];
+  const cohorts = ['Khung 2022', 'Khung 2024'];
+  const units = ['Phòng Khảo thí', 'Phòng Đảm bảo chất lượng'];
+
+  // Lấy danh sách người theo vai trò + bộ lọc
+  useEffect(() => {
+    let abort = false;
+
+    async function load() {
+      setLoading(true);
+      setToast(null);
+      setSelectAll(false);
+      setSelected({});
+      try {
+        // Nếu đã có API riêng của bạn, thay đoạn dưới bằng fetch tới endpoint thật.
+        // Ví dụ: const res = await fetch(`/api/qa/targeting?role=${role}&dept=${dept}&cohort=${cohort}&unit=${unit}`);
+        // const data = await res.json();
+
+        // Mock data tối giản để trang không vỡ khi chưa có backend
+        const mock: Person[] =
+          role === 'lecturer'
+            ? [
+                { id: 'lec1', name: 'BS. Nguyễn A', email: 'nguyena@example.com', extra: 'YHCT Nội' },
+                { id: 'lec2', name: 'ThS. Trần B', email: 'tranb@example.com', extra: 'Châm cứu' },
+              ]
+            : role === 'student'
+            ? [
+                { id: 'stu1', name: 'SV. Lê C', email: 'lec@example.com', extra: 'Khung 2022' },
+                { id: 'stu2', name: 'SV. Phạm D', email: 'phamd@example.com', extra: 'Khung 2024' },
+              ]
+            : [
+                { id: 'sup1', name: 'NV. Võ E', email: 'voe@example.com', extra: 'Phòng Khảo thí' },
+                { id: 'sup2', name: 'NV. Hồ F', email: 'hof@example.com', extra: 'Phòng ĐBCL' },
+              ];
+
+        // Lọc theo các combobox nếu có chọn
+        const filtered = mock.filter((p) => {
+          if (role === 'lecturer' && dept) return p.extra === dept;
+          if (role === 'student' && cohort) return p.extra === cohort;
+          if (role === 'support' && unit) return p.extra === unit;
+          return true;
+        });
+
+        if (!abort) setPeople(filtered);
+      } catch (e: any) {
+        if (!abort) setToast({ type: 'error', text: e?.message ?? 'Không tải được danh sách' });
+      } finally {
+        if (!abort) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      abort = true;
+    };
+  }, [role, dept, cohort, unit]);
+
+  const rows = useMemo(() => people, [people]);
+
+  const selectedCount = useMemo(
+    () => rows.filter((r) => selected[r.id]).length,
+    [rows, selected]
+  );
+
+  function toggleAll() {
+    const next = !selectAll;
+    setSelectAll(next);
+    const map: Record<string, boolean> = {};
+    rows.forEach((r) => {
+      map[r.id] = next;
+    });
+    setSelected(map);
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  async function send() {
+    if (!surveyId) {
+      setToast({ type: 'error', text: 'Thiếu surveyId trên URL (?surveyId=...)' });
+      return;
+    }
+    const recipients = rows.filter((r) => selected[r.id]).map((r) => r.email);
+    if (recipients.length === 0) {
+      setToast({ type: 'error', text: 'Chưa chọn người nhận nào' });
+      return;
+    }
+    setLoading(true);
+    setToast(null);
+    try {
+      const res = await fetch(`/api/qa/surveys/${surveyId}/send-invites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipients, message }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error ?? `HTTP ${res.status}`);
+      }
+      setToast({ type: 'success', text: `Đã gửi ${recipients.length} email.` });
+    } catch (e: any) {
+      setToast({ type: 'error', text: e?.message ?? 'Gửi email thất bại' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold">Duyệt đối tượng vào khảo sát</h1>
+        <p className="text-sm text-gray-600">
+          Chọn nhóm đối tượng, áp bộ lọc rồi tick những người cần mời. Sau đó soạn email và gửi lời mời/nhắc.
+        </p>
+      </div>
+
+      {/* Chọn vai trò */}
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="role"
+            value="lecturer"
+            checked={role === 'lecturer'}
+            onChange={() => setRole('lecturer')}
+          />
+          <span>Giảng viên</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="role"
+            value="student"
+            checked={role === 'student'}
+            onChange={() => setRole('student')}
+          />
+          <span>Sinh viên</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="role"
+            value="support"
+            checked={role === 'support'}
+            onChange={() => setRole('support')}
+          />
+          <span>Bộ phận hỗ trợ</span>
+        </label>
+
+        <div className="ml-auto text-sm text-gray-500">
+          Survey ID:&nbsp;<code>{surveyId || '(chưa có)'}</code>
+        </div>
+      </div>
+
+      {/* Bộ lọc */}
+      <div className="flex flex-wrap gap-3">
+        {role === 'lecturer' && (
+          <select
+            className="border rounded px-3 py-2"
+            value={dept}
+            onChange={(e) => setDept(e.target.value)}
+          >
+            <option value="">— Chọn bộ môn —</option>
+            {departments.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {role === 'student' && (
+          <select
+            className="border rounded px-3 py-2"
+            value={cohort}
+            onChange={(e) => setCohort(e.target.value)}
+          >
+            <option value="">— Chọn khung CTĐT —</option>
+            {cohorts.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {role === 'support' && (
+          <select
+            className="border rounded px-3 py-2"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+          >
+            <option value="">— Chọn đơn vị —</option>
+            {units.map((u) => (
+              <option key={u} value={u}>
+                {u}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* Bảng chọn đối tượng */}
+      <div className="border rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="font-medium">
+            Danh sách ({rows.length}) • Đã chọn {selectedCount}
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={selectAll} onChange={toggleAll} />
+            <span>Chọn tất cả</span>
+          </label>
+        </div>
+
+        <div className="overflow-auto">
+          <table className="min-w-[640px] w-full border-collapse">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-3 w-10">#</th>
+                <th className="py-2 pr-3">Họ tên</th>
+                <th className="py-2 pr-3">Email</th>
+                <th className="py-2 pr-3">{role === 'lecturer' ? 'Bộ môn' : role === 'student' ? 'Khung CTĐT' : 'Đơn vị'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.id} className="border-b hover:bg-gray-50">
+                  <td className="py-2 pr-3">
+                    <input
+                      type="checkbox"
+                      checked={!!selected[p.id]}
+                      onChange={() => toggleOne(p.id)}
+                    />
+                  </td>
+                  <td className="py-2 pr-3">{p.name}</td>
+                  <td className="py-2 pr-3">{p.email}</td>
+                  <td className="py-2 pr-3">{p.extra || '-'}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td className="py-6 text-center text-sm text-gray-500" colSpan={4}>
+                    Không có dữ liệu.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Soạn email mời/nhắc */}
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="font-medium">Soạn email mời/nhắc</div>
+        <textarea
+          className="w-full border rounded p-2"
+          rows={8}
+          placeholder="Nội dung email mời/nhắc tham gia khảo sát…"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+        />
+        <button
+          onClick={send}
+          disabled={loading || selectedCount === 0}
+          className={`px-3 py-2 rounded text-white ${loading || selectedCount === 0 ? 'bg-gray-400' : 'bg-black'}`}
+        >
+          {loading ? 'Đang gửi…' : 'Gửi email cho mục đã chọn'}
+        </button>
+        <div className="text-xs text-gray-500">
+          Email sẽ gửi qua endpoint <code>/api/qa/surveys/[id]/send-invites</code> theo cấu hình SMTP/Resend của bạn.
+        </div>
+        {toast && (
+          <div className={`mt-2 text-sm ${toast.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+            {toast.text}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
