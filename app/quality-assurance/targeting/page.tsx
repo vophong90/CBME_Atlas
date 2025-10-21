@@ -1,6 +1,9 @@
+// app/quality-assurance/targeting/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+export const dynamic = 'force-dynamic';
+
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
 
@@ -13,7 +16,7 @@ type Person = {
   extra?: string;
 };
 
-export default function TargetingPage() {
+function TargetingContent() {
   const supabase = getSupabase();
   const searchParams = useSearchParams();
   const surveyId = searchParams.get('surveyId') ?? '';
@@ -52,20 +55,27 @@ export default function TargetingPage() {
             : ['profiles', 'support.profiles'];
 
         for (const tbl of tableCandidates) {
-          const [schema, name] = tbl.includes('.') ? tbl.split('.') : ['public', tbl];
+          const name = tbl.includes('.') ? tbl.split('.')[1] : tbl;
           const { data, error } = await supabase
             .from(name)
             .select('id,name,email,department,cohort,unit')
             .limit(2000);
-          if (error?.code === '42P01') continue; // table not found -> thử bảng khác
+
+          // Nếu không có bảng → thử bảng khác
+          if ((error as any)?.code === '42P01') continue;
           if (error) throw error;
+
           if (data && data.length > 0) {
             loaded = (data as any[]).map((r) => ({
               id: r.id,
               name: r.name ?? r.email ?? r.id,
               email: r.email ?? '',
               extra:
-                role === 'lecturer' ? r.department ?? '' : role === 'student' ? r.cohort ?? '' : r.unit ?? '',
+                role === 'lecturer'
+                  ? r.department ?? ''
+                  : role === 'student'
+                  ? r.cohort ?? ''
+                  : r.unit ?? '',
             }));
             break;
           }
@@ -86,7 +96,7 @@ export default function TargetingPage() {
                 ]
               : [
                   { id: 'sup1', name: 'NV. Võ E', email: 'voe@example.com', extra: 'Phòng Khảo thí' },
-                  { id: 'sup2', name: 'NV. Hồ F', email: 'hof@example.com', extra: 'Phòng ĐBCL' },
+                  { id: 'sup2', name: 'NV. Hồ F', email: 'hof@example.com', extra: 'Phòng Đảm bảo chất lượng' },
                 ];
         }
 
@@ -109,7 +119,8 @@ export default function TargetingPage() {
     return () => {
       abort = true;
     };
-  }, [role, dept, cohort, unit, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, dept, cohort, unit]); // tránh đưa supabase vào deps để không re-run không cần thiết
 
   const rows = useMemo(() => people, [people]);
   const selectedCount = useMemo(() => rows.filter((r) => selected[r.id]).length, [rows, selected]);
@@ -280,9 +291,19 @@ export default function TargetingPage() {
           Gửi qua endpoint <code>/api/qa/surveys/[id]/send-invites</code>, cấu hình SMTP/Resend ở ENV.
         </div>
         {toast && (
-          <div className={`mt-2 text-sm ${toast.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{toast.text}</div>
+          <div className={`mt-2 text-sm ${toast.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+            {toast.text}
+          </div>
         )}
       </div>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Đang tải tham số…</div>}>
+      <TargetingContent />
+    </Suspense>
   );
 }
