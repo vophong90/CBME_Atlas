@@ -38,7 +38,7 @@ type StaffRow = {
   full_name: string;
   is_active: boolean;
   roles: string[];
-  departments: string[]; // hiển thị bằng mã bộ môn (vd: YHCT)
+  departments: string[]; // hiển thị mã/tên bộ môn
 };
 
 // tách chuỗi "a;b, c" -> ["a","b","c"]
@@ -47,6 +47,66 @@ function splitCodes(s: string) {
     .split(/[;,]/)
     .map((t) => t.trim())
     .filter(Boolean);
+}
+
+/** Parser CSV nhỏ gọn:
+ * - Hỗ trợ dấu phẩy trong ô có ngoặc kép
+ * - Hỗ trợ escape `""` -> `"`
+ * - KHÔNG hỗ trợ ô đa dòng (nên để mỗi bản ghi 1 dòng)
+ */
+function splitCSVLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        // có thể là escaped double-quote
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        cells.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+  }
+  cells.push(cur);
+  return cells.map((s) => s.trim());
+}
+
+function parseCsvText(text: string) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  // bỏ dòng trống đầu/cuối
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) return [];
+
+  const header = splitCSVLine(lines[0]);
+  const rows: any[] = [];
+  for (let li = 1; li < lines.length; li++) {
+    const raw = lines[li];
+    if (!raw.trim()) continue;
+    const cells = splitCSVLine(raw);
+    const obj: any = {};
+    header.forEach((h, i) => {
+      obj[h] = cells[i] ?? '';
+    });
+    rows.push(obj);
+  }
+  return rows;
 }
 
 export default function AdminUsersPage() {
@@ -134,41 +194,16 @@ export default function AdminUsersPage() {
   }, [q, rows]);
 
   // =====================
-  // CSV: parser fallback đơn giản
+  // CSV handlers — KHÔNG dùng papaparse
   // =====================
-  function naiveParseCSV(text: string) {
-    const lines = text.trim().split(/\r?\n/);
-    const header = (lines.shift() || '')
-      .split(',')
-      .map((s) => s.trim());
-    return lines
-      .filter(Boolean)
-      .map((line) => {
-        const cells = line.split(',').map((s) => s.trim());
-        const obj: any = {};
-        header.forEach((h, i) => (obj[h] = cells[i] ?? ''));
-        return obj;
-      });
-  }
-  // Parse file CSV: ưu tiên PapaParse; nếu chưa cài, tự rơi về naive
-  async function parseCsvFile(file: File) {
-    const text = await file.text();
-    try {
-      const Papa = (await import('papaparse')).default;
-      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-      const rows = (parsed?.data as any[]) || [];
-      return rows;
-    } catch {
-      return naiveParseCSV(text);
-    }
-  }
   async function handleImportFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] || null;
     setImportFile(f);
     setCsvPreview([]);
     if (!f) return;
-    const rows = await parseCsvFile(f);
-    const norm = rows.map((r) => ({
+    const text = await f.text();
+    const parsed = parseCsvText(text);
+    const norm = parsed.map((r) => ({
       email: (r.email || '').trim(),
       full_name: (r.full_name || '').trim(),
       department_code: (r.department_code || '').trim(),
@@ -179,6 +214,7 @@ export default function AdminUsersPage() {
     if (missing) alert(`Có ${missing} dòng thiếu email hoặc full_name. Vui lòng kiểm tra lại file.`);
     setCsvPreview(norm);
   }
+
   async function onImportConfirm() {
     if (!csvPreview.length) return;
     setImporting(true);
@@ -296,7 +332,7 @@ export default function AdminUsersPage() {
         alert('Cập nhật lỗi: ' + (json?.error || 'unknown'));
         return;
       }
-      // Cập nhật ngay trên UI
+      // Cập nhật UI
       setRows((old) =>
         old.map((x) =>
           x.user_id === editRow.user_id
@@ -461,9 +497,7 @@ export default function AdminUsersPage() {
                       <input
                         value={editRow.department_codes}
                         onChange={(e) =>
-                          setEditRow((s) =>
-                            s ? { ...s, department_codes: e.target.value } : s,
-                          )
+                          setEditRow((s) => (s ? { ...s, department_codes: e.target.value } : s))
                         }
                         placeholder="Mã bộ môn; phân tách ; hoặc ,"
                         className={INPUT_SM}
