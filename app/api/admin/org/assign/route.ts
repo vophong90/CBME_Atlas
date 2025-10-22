@@ -1,24 +1,27 @@
+// app/api/admin/org/assign/route.ts
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 
+// POST { department_id: string, user_ids: string[] }
 export async function POST(req: Request) {
   try {
-    const { department_id, user_ids } = await req.json();
-    if (!department_id || !Array.isArray(user_ids) || !user_ids.length) {
-      return NextResponse.json({ error: 'Missing department_id/user_ids' }, { status: 400 });
+    const body = await req.json();
+    const { department_id, user_ids } = body || {};
+    if (!department_id || !Array.isArray(user_ids) || user_ids.length === 0) {
+      return NextResponse.json({ error: 'Missing department_id or user_ids' }, { status: 400 });
     }
-    // chuyển BM: reset is_head=false nếu đang là head ở BM khác
-    const updates = user_ids.map((uid: string) => ({
-      user_id: uid,
-      department_id,
-      is_head: false,
-    }));
-    const { error } = await supabaseAdmin.from('staff').upsert(updates, { onConflict: 'user_id' });
-    if (error) throw error;
-    return NextResponse.json({ ok: true, count: user_ids.length });
+
+    const { data, error } = await supabaseAdmin
+      .from('staff')
+      .update({ department_id })
+      .in('user_id', user_ids)
+      .select('user_id,department_id');
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ ok: true, updated: data?.length ?? 0 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'error' }, { status: 400 });
+    return NextResponse.json({ error: e?.message || 'unknown' }, { status: 500 });
   }
 }
