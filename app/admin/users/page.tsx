@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-// ===== UI helpers: đồng bộ palette brand như trang bạn chụp =====
+// ===== UI helpers: đồng bộ palette brand =====
 const BTN_BRAND =
   'px-3 py-1.5 rounded-lg font-semibold bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-300 disabled:cursor-not-allowed';
 const BTN_BRAND_OUTLINE =
@@ -23,17 +23,8 @@ type StaffRow = {
   email: string;
   full_name: string;
   is_active: boolean;
-  departments: string[];
-  roles: string[];         // codes, vd: ['lecturer','qa']
-  role_labels?: string[];  // label tiếng Việt lấy từ bảng roles (ưu tiên hiển thị)
+  // các field khác nếu API có trả cũng không dùng ở UI này
 };
-
-function splitCodes(s: string) {
-  return (s || '')
-    .split(/[;,]/)
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
 
 // --- CSV parser đơn giản (không hỗ trợ nhiều dòng trong 1 ô) ---
 function splitCSVLine(line: string): string[] {
@@ -59,7 +50,7 @@ function parseCsvText(text: string) {
   const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
     .filter((l) => l.trim().length);
   if (!lines.length) return [];
-  const header = splitCSVLine(lines[0]);
+  const header = splitCSVLine(lines[0]).map(h => h.trim());
   const rows: any[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cells = splitCSVLine(lines[i]);
@@ -85,7 +76,7 @@ export default function AdminUsersPage() {
 
   // ===== tạo nhanh 1 user =====
   const [newRowMode, setNewRowMode] = useState(false);
-  const [newRow, setNewRow] = useState({ email: '', full_name: '', department_code: '', roles: '', password: '' });
+  const [newRow, setNewRow] = useState({ email: '', full_name: '', password: '' });
   const [creating, setCreating] = useState(false);
 
   // ===== reset password modal =====
@@ -94,11 +85,11 @@ export default function AdminUsersPage() {
 
   // ===== sửa inline =====
   const [editId, setEditId] = useState<string | null>(null);
-  const [editRow, setEditRow] = useState<{
-    user_id: string; email: string; full_name: string; is_active: boolean;
-    department_codes: string; role_codes: string;
-  } | null>(null);
+  const [editRow, setEditRow] = useState<{ user_id: string; email: string; full_name: string; is_active: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // ===== xóa =====
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // ===== fetch danh sách thật từ /api/admin/users/list =====
   async function refetchList() {
@@ -108,7 +99,7 @@ export default function AdminUsersPage() {
       const res = await fetch('/api/admin/users/list', { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Fetch list failed');
-      setRows(json.rows || []);
+      setRows((json.rows || []) as StaffRow[]);
     } catch (e: any) {
       setErrorMsg(e?.message || 'Không tải được danh sách.');
       setRows([]);
@@ -123,8 +114,7 @@ export default function AdminUsersPage() {
     const k = q.trim().toLowerCase();
     if (!k) return rows;
     return rows.filter((r) =>
-      [r.email, r.full_name, ...r.roles, ...(r.role_labels || []), ...r.departments]
-        .join(' ').toLowerCase().includes(k),
+      [r.email, r.full_name].join(' ').toLowerCase().includes(k),
     );
   }, [q, rows]);
 
@@ -136,11 +126,10 @@ export default function AdminUsersPage() {
     if (!f) return;
     const text = await f.text();
     const parsed = parseCsvText(text);
+    // chỉ lấy 3 cột này nếu có; bỏ qua cột khác
     const norm = parsed.map((r) => ({
       email: (r.email || '').trim(),
       full_name: (r.full_name || '').trim(),
-      department_code: (r.department_code || '').trim(),
-      roles: (r.roles || '').trim(), // "lecturer;qa"
       password: (r.password || '').trim(),
     }));
     const missing = norm.filter((r) => !r.email || !r.full_name).length;
@@ -151,11 +140,10 @@ export default function AdminUsersPage() {
     if (!csvPreview.length) return;
     setImporting(true);
     try {
+      // API bulk-import chấp nhận thiếu department_code/roles -> server sẽ random password nếu trống
       const payload = csvPreview.map((x) => ({
         email: x.email,
         full_name: x.full_name,
-        department_code: x.department_code || null,
-        roles: x.roles || null,
         password: x.password || null,
       }));
       const res = await fetch('/api/admin/users/bulk-import', { method: 'POST', body: JSON.stringify(payload) });
@@ -169,13 +157,13 @@ export default function AdminUsersPage() {
   // ===== tạo nhanh 1 user =====
   function openNewRow() {
     setNewRowMode(true);
-    setNewRow({ email: '', full_name: '', department_code: '', roles: '', password: '' });
+    setNewRow({ email: '', full_name: '', password: '' });
   }
   async function createNewUser() {
     if (!newRow.email || !newRow.full_name) { alert('Nhập Email & Họ tên'); return; }
     setCreating(true);
     try {
-      const payload = [{ ...newRow, department_code: newRow.department_code || null, roles: newRow.roles || null, password: newRow.password || null }];
+      const payload = [{ email: newRow.email, full_name: newRow.full_name, password: newRow.password || null }];
       const res = await fetch('/api/admin/users/bulk-import', { method: 'POST', body: JSON.stringify(payload) });
       const json = await res.json();
       const r = json?.results?.[0];
@@ -187,27 +175,19 @@ export default function AdminUsersPage() {
   // ===== sửa inline =====
   function onEdit(r: StaffRow) {
     setEditId(r.user_id);
-    setEditRow({
-      user_id: r.user_id,
-      email: r.email,
-      full_name: r.full_name,
-      is_active: r.is_active,
-      department_codes: (r.departments || []).join(';'),
-      role_codes: (r.roles || []).join(';'),
-    });
+    setEditRow({ user_id: r.user_id, email: r.email, full_name: r.full_name, is_active: r.is_active });
   }
   function onCancelEdit() { setEditId(null); setEditRow(null); }
   async function onSaveEdit() {
     if (!editRow) return;
     setSaving(true);
     try {
+      // chỉ cập nhật trường cơ bản, không đụng vai trò/bộ môn
       const payload = {
         user_id: editRow.user_id,
         email: editRow.email?.trim(),
         full_name: editRow.full_name?.trim(),
         is_active: !!editRow.is_active,
-        department_codes: splitCodes(editRow.department_codes),
-        role_codes: splitCodes(editRow.role_codes),
       };
       const res = await fetch('/api/admin/users/update', { method: 'POST', body: JSON.stringify(payload) });
       const json = await res.json();
@@ -225,11 +205,24 @@ export default function AdminUsersPage() {
     setResetTarget(null); setNewPassword('');
   }
 
+  // ===== xóa user =====
+  async function onDeleteUser(user: StaffRow) {
+    if (!confirm(`Xoá tài khoản: ${user.full_name} (${user.email})?`)) return;
+    setDeletingId(user.user_id);
+    try {
+      const res = await fetch('/api/admin/users/delete', { method: 'POST', body: JSON.stringify({ userId: user.user_id }) });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) { alert(json?.error || 'Xoá thất bại'); return; }
+      await refetchList();
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Quản lý nhân sự</h1>
 
-      {/* Banner lỗi */}
       {!!errorMsg && (
         <div className="rounded-lg border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
           Không tải được danh sách: {errorMsg}
@@ -239,7 +232,7 @@ export default function AdminUsersPage() {
       <section className="rounded-xl border bg-white p-5 shadow space-y-6">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-slate-600 text-sm">Tạo/Sửa/Xoá, gán vai trò, đặt lại mật khẩu, import CSV.</div>
+          <div className="text-slate-600 text-sm">Tạo/Sửa/Xoá, đặt lại mật khẩu, import CSV.</div>
           <div className="flex items-center gap-2">
             <button onClick={refetchList} className={BTN_BRAND_OUTLINE}>Làm mới</button>
             <button onClick={() => setShowImport(true)} className={BTN_NEUTRAL_OUTLINE}>Import CSV</button>
@@ -249,7 +242,7 @@ export default function AdminUsersPage() {
 
         {/* Tìm kiếm */}
         <div>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo tên, email, vai trò, bộ môn..." className={INPUT} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo tên, email..." className={INPUT} />
         </div>
 
         {/* Bảng */}
@@ -263,8 +256,6 @@ export default function AdminUsersPage() {
                   <tr className="text-left text-slate-500">
                     <th className="px-3 py-2">Họ tên</th>
                     <th className="px-3 py-2">Email</th>
-                    <th className="px-3 py-2">Bộ môn</th>
-                    <th className="px-3 py-2">Vai trò</th>
                     <th className="px-3 py-2">Kích hoạt</th>
                     <th className="px-3 py-2 text-right">Thao tác</th>
                   </tr>
@@ -273,10 +264,12 @@ export default function AdminUsersPage() {
                   {/* Dòng thêm mới */}
                   {newRowMode && (
                     <tr className="border-t bg-slate-50">
-                      <td className="px-3 py-2"><input value={newRow.full_name} onChange={(e)=>setNewRow(s=>({...s,full_name:e.target.value}))} placeholder="Họ tên" className={INPUT_SM}/></td>
-                      <td className="px-3 py-2"><input value={newRow.email} onChange={(e)=>setNewRow(s=>({...s,email:e.target.value}))} placeholder="email@uni.edu" className={INPUT_SM}/></td>
-                      <td className="px-3 py-2"><input value={newRow.department_code} onChange={(e)=>setNewRow(s=>({...s,department_code:e.target.value}))} placeholder="Mã bộ môn (vd: YHCT)" className={INPUT_SM}/></td>
-                      <td className="px-3 py-2"><input value={newRow.roles} onChange={(e)=>setNewRow(s=>({...s,roles:e.target.value}))} placeholder="Vai trò (vd: lecturer;qa)" className={INPUT_SM}/></td>
+                      <td className="px-3 py-2">
+                        <input value={newRow.full_name} onChange={(e)=>setNewRow(s=>({...s,full_name:e.target.value}))} placeholder="Họ tên" className={INPUT_SM}/>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input value={newRow.email} onChange={(e)=>setNewRow(s=>({...s,email:e.target.value}))} placeholder="email@uni.edu" className={INPUT_SM}/>
+                      </td>
                       <td className="px-3 py-2 text-slate-400 text-center">—</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-2">
@@ -292,14 +285,11 @@ export default function AdminUsersPage() {
                   {filtered.map((r) =>
                     editId === r.user_id && editRow ? (
                       <tr key={r.user_id} className="border-t bg-yellow-50/50">
-                        <td className="px-3 py-2"><input value={editRow.full_name} onChange={(e)=>setEditRow(s=>s?{...s,full_name:e.target.value}:s)} className={INPUT_SM}/></td>
-                        <td className="px-3 py-2"><input value={editRow.email} onChange={(e)=>setEditRow(s=>s?{...s,email:e.target.value}:s)} className={INPUT_SM}/></td>
-                        <td className="px-3 py-2"><input value={editRow.department_codes} onChange={(e)=>setEditRow(s=>s?{...s,department_codes:e.target.value}:s)} placeholder="Mã bộ môn; phân tách ; hoặc ," className={INPUT_SM}/></td>
                         <td className="px-3 py-2">
-                          <input value={editRow.role_codes} onChange={(e)=>setEditRow(s=>s?{...s,role_codes:e.target.value}:s)} placeholder="Vai trò; (vd: lecturer;qa)" className={INPUT_SM}/>
-                          <div className="mt-1 text-[11px] text-slate-500">
-                            {(splitCodes(editRow.role_codes)).join(', ') || '—'}
-                          </div>
+                          <input value={editRow.full_name} onChange={(e)=>setEditRow(s=>s?{...s,full_name:e.target.value}:s)} className={INPUT_SM}/>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input value={editRow.email} onChange={(e)=>setEditRow(s=>s?{...s,email:e.target.value}:s)} className={INPUT_SM}/>
                         </td>
                         <td className="px-3 py-2">
                           <label className="inline-flex items-center gap-2 text-sm">
@@ -316,10 +306,6 @@ export default function AdminUsersPage() {
                       <tr key={r.user_id} className="border-t">
                         <td className="px-3 py-2">{r.full_name}</td>
                         <td className="px-3 py-2">{r.email}</td>
-                        <td className="px-3 py-2">{(r.departments||[]).join(', ') || '-'}</td>
-                        <td className="px-3 py-2">
-                          {r.role_labels?.length ? r.role_labels.join(', ') : (r.roles||[]).join(', ') || '—'}
-                        </td>
                         <td className="px-3 py-2">
                           {r.is_active ? (
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">Active</span>
@@ -330,14 +316,16 @@ export default function AdminUsersPage() {
                         <td className="px-3 py-2 text-right">
                           <button className={`${BTN_NEUTRAL_OUTLINE} mr-2`} onClick={() => onEdit(r)}>Sửa</button>
                           <button className={`${BTN_NEUTRAL_OUTLINE} mr-2`} onClick={() => setResetTarget({ user_id: r.user_id, email: r.email })}>Đặt lại mật khẩu</button>
-                          <button className={BTN_DANGER_OUTLINE} onClick={() => alert('TODO: Xoá người dùng')}>Xoá</button>
+                          <button className={BTN_DANGER_OUTLINE} onClick={() => onDeleteUser(r)} disabled={deletingId===r.user_id}>
+                            {deletingId===r.user_id ? 'Đang xoá...' : 'Xoá'}
+                          </button>
                         </td>
                       </tr>
                     )
                   )}
 
                   {!filtered.length && !loading && (
-                    <tr><td className="px-3 py-6 text-center text-slate-500" colSpan={6}>Không có dữ liệu</td></tr>
+                    <tr><td className="px-3 py-6 text-center text-slate-500" colSpan={4}>Không có dữ liệu</td></tr>
                   )}
                 </tbody>
               </table>
@@ -352,7 +340,7 @@ export default function AdminUsersPage() {
           <div className="w-full max-w-2xl rounded-xl border bg-white p-4 shadow">
             <div className="text-lg font-semibold">Import CSV</div>
             <p className="text-sm text-slate-600">
-              Header: <code>email,full_name,department_code,roles,password</code>
+              Header tối thiểu: <code>email,full_name</code>. (Tuỳ chọn: <code>password</code>)
             </p>
 
             <div className="mt-3 flex items-center gap-3">
@@ -365,10 +353,18 @@ export default function AdminUsersPage() {
                 <div className="mb-2 text-sm font-medium">Xem trước ({csvPreview.length} dòng)</div>
                 <div className="max-h-56 overflow-auto text-xs">
                   <table className="min-w-full">
-                    <thead><tr>{Object.keys(csvPreview[0]).map((h)=><th key={h} className="px-2 py-1 text-left">{h}</th>)}</tr></thead>
-                    <tbody>{csvPreview.map((r,i)=>(
-                      <tr key={i} className="border-t">{Object.values(r).map((v,j)=><td key={j} className="px-2 py-1">{String(v)}</td>)}</tr>
-                    ))}</tbody>
+                    <thead>
+                      <tr>
+                        {Object.keys(csvPreview[0]).map((h)=><th key={h} className="px-2 py-1 text-left">{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.map((r,i)=>(
+                        <tr key={i} className="border-t">
+                          {Object.values(r).map((v,j)=><td key={j} className="px-2 py-1">{String(v)}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
                 </div>
               </div>
