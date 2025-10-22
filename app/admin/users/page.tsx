@@ -14,7 +14,6 @@ const ROLE_VI: Record<string, string> = {
   support: 'Hỗ trợ',
   student: 'Sinh viên',
 };
-
 function labelRoles(codes: string[] = []) {
   return codes.map((c) => ROLE_VI[c] ?? c);
 }
@@ -22,9 +21,12 @@ function labelRoles(codes: string[] = []) {
 // =====================
 // UI helper classes (đồng bộ màu)
 // =====================
-const BTN_PRIMARY = 'rounded-xl bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-700 disabled:opacity-60';
-const BTN_OUTLINE = 'rounded-xl border border-slate-200 px-3 py-1.5 hover:bg-slate-50 disabled:opacity-60';
-const BTN_DANGER = 'rounded-xl border border-red-200 px-3 py-1.5 text-red-600 hover:bg-red-50 disabled:opacity-60';
+const BTN_PRIMARY =
+  'rounded-xl bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-700 disabled:opacity-60';
+const BTN_OUTLINE =
+  'rounded-xl border border-slate-200 px-3 py-1.5 hover:bg-slate-50 disabled:opacity-60';
+const BTN_DANGER =
+  'rounded-xl border border-red-200 px-3 py-1.5 text-red-600 hover:bg-red-50 disabled:opacity-60';
 const INPUT =
   'w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:ring focus:ring-indigo-100';
 const INPUT_SM =
@@ -36,8 +38,16 @@ type StaffRow = {
   full_name: string;
   is_active: boolean;
   roles: string[];
-  departments: string[]; // tên/mã bộ môn để hiển thị
+  departments: string[]; // hiển thị bằng mã bộ môn (vd: YHCT)
 };
+
+// tách chuỗi "a;b, c" -> ["a","b","c"]
+function splitCodes(s: string) {
+  return (s || '')
+    .split(/[;,]/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
 
 export default function AdminUsersPage() {
   // =====================
@@ -72,6 +82,20 @@ export default function AdminUsersPage() {
   // =====================
   const [resetTarget, setResetTarget] = useState<{ user_id: string; email: string } | null>(null);
   const [newPassword, setNewPassword] = useState('');
+
+  // =====================
+  // Sửa thông tin (inline)
+  // =====================
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editRow, setEditRow] = useState<{
+    user_id: string;
+    email: string;
+    full_name: string;
+    is_active: boolean;
+    department_codes: string; // nhập CSV/; phân tách
+    role_codes: string; // nhập CSV/;
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // =====================
   // Mock load (bạn thay bằng fetch /api thật)
@@ -126,7 +150,6 @@ export default function AdminUsersPage() {
         return obj;
       });
   }
-
   // Parse file CSV: ưu tiên PapaParse; nếu chưa cài, tự rơi về naive
   async function parseCsvFile(file: File) {
     const text = await file.text();
@@ -139,15 +162,12 @@ export default function AdminUsersPage() {
       return naiveParseCSV(text);
     }
   }
-
   async function handleImportFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] || null;
     setImportFile(f);
     setCsvPreview([]);
     if (!f) return;
     const rows = await parseCsvFile(f);
-
-    // chuẩn hoá cột
     const norm = rows.map((r) => ({
       email: (r.email || '').trim(),
       full_name: (r.full_name || '').trim(),
@@ -155,14 +175,10 @@ export default function AdminUsersPage() {
       roles: (r.roles || '').trim(), // ví dụ: "lecturer;qa"
       password: (r.password || '').trim(),
     }));
-
     const missing = norm.filter((r) => !r.email || !r.full_name).length;
-    if (missing) {
-      alert(`Có ${missing} dòng thiếu email hoặc full_name. Vui lòng kiểm tra lại file.`);
-    }
+    if (missing) alert(`Có ${missing} dòng thiếu email hoặc full_name. Vui lòng kiểm tra lại file.`);
     setCsvPreview(norm);
   }
-
   async function onImportConfirm() {
     if (!csvPreview.length) return;
     setImporting(true);
@@ -180,7 +196,6 @@ export default function AdminUsersPage() {
       });
       const json = await res.json();
       alert('Import xong:\n' + JSON.stringify(json.results, null, 2));
-      // đóng modal + clear
       setShowImport(false);
       setImportFile(null);
       setCsvPreview([]);
@@ -195,15 +210,8 @@ export default function AdminUsersPage() {
   // =====================
   function openNewRow() {
     setNewRowMode(true);
-    setNewRow({
-      email: '',
-      full_name: '',
-      department_code: '',
-      roles: '',
-      password: '',
-    });
+    setNewRow({ email: '', full_name: '', department_code: '', roles: '', password: '' });
   }
-
   async function createNewUser() {
     if (!newRow.email || !newRow.full_name) {
       alert('Vui lòng nhập tối thiểu Email và Họ tên');
@@ -229,7 +237,7 @@ export default function AdminUsersPage() {
       if (r?.ok) {
         alert('Đã tạo tài khoản mới!');
         setNewRowMode(false);
-        // TODO: refetch danh sách thật; tạm append mock để thấy ngay
+        // TODO: refetch danh sách thật; tạm append mock
         setRows((old) => [
           ...old,
           {
@@ -237,10 +245,7 @@ export default function AdminUsersPage() {
             email: newRow.email,
             full_name: newRow.full_name,
             is_active: true,
-            roles: (newRow.roles || '')
-              .split(/[;,]/)
-              .map((s) => s.trim())
-              .filter(Boolean),
+            roles: splitCodes(newRow.roles),
             departments: newRow.department_code ? [newRow.department_code] : [],
           },
         ]);
@@ -249,6 +254,66 @@ export default function AdminUsersPage() {
       }
     } finally {
       setCreating(false);
+    }
+  }
+
+  // =====================
+  // Sửa thông tin (inline)
+  // =====================
+  function onEdit(r: StaffRow) {
+    setEditId(r.user_id);
+    setEditRow({
+      user_id: r.user_id,
+      email: r.email,
+      full_name: r.full_name,
+      is_active: r.is_active,
+      department_codes: r.departments.join(';'),
+      role_codes: r.roles.join(';'),
+    });
+  }
+  function onCancelEdit() {
+    setEditId(null);
+    setEditRow(null);
+  }
+  async function onSaveEdit() {
+    if (!editRow) return;
+    setSaving(true);
+    try {
+      const payload = {
+        user_id: editRow.user_id,
+        email: editRow.email?.trim(),
+        full_name: editRow.full_name?.trim(),
+        is_active: !!editRow.is_active,
+        department_codes: splitCodes(editRow.department_codes),
+        role_codes: splitCodes(editRow.role_codes),
+      };
+      const res = await fetch('/api/admin/users/update', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!json?.ok) {
+        alert('Cập nhật lỗi: ' + (json?.error || 'unknown'));
+        return;
+      }
+      // Cập nhật ngay trên UI
+      setRows((old) =>
+        old.map((x) =>
+          x.user_id === editRow.user_id
+            ? {
+                ...x,
+                email: payload.email || x.email,
+                full_name: payload.full_name || x.full_name,
+                is_active: payload.is_active,
+                roles: payload.role_codes,
+                departments: payload.department_codes,
+              }
+            : x,
+        ),
+      );
+      onCancelEdit();
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -307,6 +372,7 @@ export default function AdminUsersPage() {
                 <th className="px-3 py-2">Email</th>
                 <th className="px-3 py-2">Bộ môn</th>
                 <th className="px-3 py-2">Vai trò</th>
+                <th className="px-3 py-2">Kích hoạt</th>
                 <th className="px-3 py-2 text-right">Thao tác</th>
               </tr>
             </thead>
@@ -348,6 +414,7 @@ export default function AdminUsersPage() {
                       className={INPUT_SM}
                     />
                   </td>
+                  <td className="px-3 py-2 text-slate-400 text-center">—</td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <input
@@ -368,38 +435,113 @@ export default function AdminUsersPage() {
               )}
 
               {/* Dòng dữ liệu */}
-              {filtered.map((r) => (
-                <tr key={r.user_id} className="border-t">
-                  <td className="px-3 py-2">{r.full_name}</td>
-                  <td className="px-3 py-2">{r.email}</td>
-                  <td className="px-3 py-2">{r.departments.join(', ') || '-'}</td>
-                  <td className="px-3 py-2">{labelRoles(r.roles).join(', ')}</td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      className={`${BTN_OUTLINE} mr-2`}
-                      onClick={() => alert('Chức năng Sửa sẽ gửi ở phần kế tiếp.')}
-                    >
-                      Sửa
-                    </button>
-                    <button
-                      className={`${BTN_OUTLINE} mr-2`}
-                      onClick={() => setResetTarget({ user_id: r.user_id, email: r.email })}
-                    >
-                      Đặt lại mật khẩu
-                    </button>
-                    <button
-                      className={BTN_DANGER}
-                      onClick={() => alert('TODO: Xoá người dùng')}
-                    >
-                      Xoá
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((r) =>
+                editId === r.user_id && editRow ? (
+                  // === Chế độ SỬA ===
+                  <tr key={r.user_id} className="border-t bg-yellow-50/50">
+                    <td className="px-3 py-2">
+                      <input
+                        value={editRow.full_name}
+                        onChange={(e) =>
+                          setEditRow((s) => (s ? { ...s, full_name: e.target.value } : s))
+                        }
+                        className={INPUT_SM}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        value={editRow.email}
+                        onChange={(e) =>
+                          setEditRow((s) => (s ? { ...s, email: e.target.value } : s))
+                        }
+                        className={INPUT_SM}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        value={editRow.department_codes}
+                        onChange={(e) =>
+                          setEditRow((s) =>
+                            s ? { ...s, department_codes: e.target.value } : s,
+                          )
+                        }
+                        placeholder="Mã bộ môn; phân tách ; hoặc ,"
+                        className={INPUT_SM}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        value={editRow.role_codes}
+                        onChange={(e) =>
+                          setEditRow((s) => (s ? { ...s, role_codes: e.target.value } : s))
+                        }
+                        placeholder="Vai trò; (vd: lecturer;qa)"
+                        className={INPUT_SM}
+                      />
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {labelRoles(splitCodes(editRow.role_codes)).join(', ') || '—'}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={!!editRow.is_active}
+                          onChange={(e) =>
+                            setEditRow((s) => (s ? { ...s, is_active: e.target.checked } : s))
+                          }
+                        />
+                        <span>Kích hoạt</span>
+                      </label>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={onCancelEdit} className={`${BTN_OUTLINE} mr-2`}>
+                        Huỷ
+                      </button>
+                      <button onClick={onSaveEdit} disabled={saving} className={BTN_PRIMARY}>
+                        {saving ? 'Đang lưu...' : 'Lưu'}
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  // === Chế độ XEM ===
+                  <tr key={r.user_id} className="border-t">
+                    <td className="px-3 py-2">{r.full_name}</td>
+                    <td className="px-3 py-2">{r.email}</td>
+                    <td className="px-3 py-2">{r.departments.join(', ') || '-'}</td>
+                    <td className="px-3 py-2">{labelRoles(r.roles).join(', ')}</td>
+                    <td className="px-3 py-2">
+                      {r.is_active ? (
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
+                          Active
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                          Inactive
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button className={`${BTN_OUTLINE} mr-2`} onClick={() => onEdit(r)}>
+                        Sửa
+                      </button>
+                      <button
+                        className={`${BTN_OUTLINE} mr-2`}
+                        onClick={() => setResetTarget({ user_id: r.user_id, email: r.email })}
+                      >
+                        Đặt lại mật khẩu
+                      </button>
+                      <button className={BTN_DANGER} onClick={() => alert('TODO: Xoá người dùng')}>
+                        Xoá
+                      </button>
+                    </td>
+                  </tr>
+                ),
+              )}
 
               {!filtered.length && (
                 <tr>
-                  <td className="px-3 py-6 text-center text-slate-500" colSpan={5}>
+                  <td className="px-3 py-6 text-center text-slate-500" colSpan={6}>
                     Không có dữ liệu
                   </td>
                 </tr>
