@@ -1,23 +1,83 @@
-// ================================
-// File 1/2: app/api/academic-affairs/upload/route.ts
-// ================================
+// app/api/academic-affairs/upload/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabaseServer';
-import { parse } from 'csv-parse/sync';
 
+/**
+ * CSV parser thuần TS (gần RFC 4180):
+ * - Hỗ trợ BOM
+ * - Dấu phẩy trong ô (,"...,...",)
+ * - Xuống dòng trong ô (ô có "...\n...")
+ * - Dấu ngoặc kép trong ô: "" -> "
+ * - Không cần thư viện ngoài
+ */
 function parseCsv(text: string): string[][] {
-  // Robust CSV: hỗ trợ BOM, dấu phẩy trong ô, xuống dòng trong ô, dấu ngoặc kép...
-  const rows: string[][] = parse(text, {
-    bom: true,
-    columns: false,          // không dùng header
-    relax_quotes: true,
-    skip_empty_lines: true,
-    trim: true,
-  });
-  return rows.filter((r) => r && r.some((c) => (c ?? '').toString().trim() !== ''));
+  if (!text) return [];
+  // bỏ BOM
+  if (text.charCodeAt(0) === 0xFEFF) {
+    text = text.slice(1);
+  }
+
+  const rows: string[][] = [];
+  let curField = '';
+  let curRow: string[] = [];
+  let inQuotes = false;
+
+  // Chuẩn hóa \r\n thành \n để dễ xử lý (nhưng vẫn parse theo trạng thái)
+  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const N = s.length;
+
+  const pushField = () => {
+    curRow.push(curField);
+    curField = '';
+  };
+  const pushRow = () => {
+    // loại dòng toàn rỗng
+    if (curRow.some((c) => (c ?? '').toString().trim() !== '')) {
+      rows.push(curRow);
+    }
+    curRow = [];
+  };
+
+  for (let i = 0; i < N; i++) {
+    const ch = s[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        const next = s[i + 1];
+        if (next === '"') {
+          // escaped quote -> thêm 1 dấu " vào field, bỏ qua ký tự tiếp theo
+          curField += '"';
+          i++;
+        } else {
+          // thoát khỏi quotes
+          inQuotes = false;
+        }
+      } else {
+        curField += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        pushField();
+      } else if (ch === '\n') {
+        pushField();
+        pushRow();
+      } else {
+        curField += ch;
+      }
+    }
+  }
+
+  // kết thúc chuỗi: đóng field/row còn dở
+  pushField();
+  if (curRow.length) pushRow();
+
+  // Trim nhẹ từng cột
+  return rows.map((r) => r.map((c) => (c ?? '').toString().trim()));
 }
 
 export async function POST(req: Request) {
@@ -66,12 +126,15 @@ export async function POST(req: Request) {
       if (error) throw error;
 
     } else if (kind === 'courses') {
-      // 2-3 cột: course_code, course_name, [credits]
+      // 2–3 cột: course_code, course_name, [credits]
       const payload = rows.map(([course_code, course_name, credits]) => ({
         framework_id,
         course_code,
         course_name: course_name ?? null,
-        credits: (credits !== undefined && credits !== null && String(credits).trim() !== '') ? Number(credits) : null,
+        credits:
+          credits !== undefined && credits !== null && String(credits).trim() !== ''
+            ? Number(credits)
+            : null,
       }));
       const { error } = await db.from('courses').insert(payload);
       if (error) throw error;
@@ -119,4 +182,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e?.message || 'Upload lỗi' }, { status: 400 });
   }
 }
-
