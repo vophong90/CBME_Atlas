@@ -1,184 +1,144 @@
 // app/api/academic-affairs/upload/route.ts
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-import { NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabaseServer';
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // Service Role để ghi DB (server-only)
+);
 
-/**
- * CSV parser thuần TS (gần RFC 4180):
- * - Hỗ trợ BOM
- * - Dấu phẩy trong ô (,"...,...",)
- * - Xuống dòng trong ô (ô có "...\n...")
- * - Dấu ngoặc kép trong ô: "" -> "
- * - Không cần thư viện ngoài
- */
-function parseCsv(text: string): string[][] {
-  if (!text) return [];
-  // bỏ BOM
-  if (text.charCodeAt(0) === 0xFEFF) {
-    text = text.slice(1);
-  }
-
-  const rows: string[][] = [];
-  let curField = '';
-  let curRow: string[] = [];
-  let inQuotes = false;
-
-  // Chuẩn hóa \r\n thành \n để dễ xử lý (nhưng vẫn parse theo trạng thái)
-  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const N = s.length;
-
-  const pushField = () => {
-    curRow.push(curField);
-    curField = '';
-  };
-  const pushRow = () => {
-    // loại dòng toàn rỗng
-    if (curRow.some((c) => (c ?? '').toString().trim() !== '')) {
-      rows.push(curRow);
-    }
-    curRow = [];
-  };
-
-  for (let i = 0; i < N; i++) {
-    const ch = s[i];
-
-    if (inQuotes) {
-      if (ch === '"') {
-        const next = s[i + 1];
-        if (next === '"') {
-          // escaped quote -> thêm 1 dấu " vào field, bỏ qua ký tự tiếp theo
-          curField += '"';
-          i++;
-        } else {
-          // thoát khỏi quotes
-          inQuotes = false;
-        }
-      } else {
-        curField += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        pushField();
-      } else if (ch === '\n') {
-        pushField();
-        pushRow();
-      } else {
-        curField += ch;
-      }
-    }
-  }
-
-  // kết thúc chuỗi: đóng field/row còn dở
-  pushField();
-  if (curRow.length) pushRow();
-
-  // Trim nhẹ từng cột
-  return rows.map((r) => r.map((c) => (c ?? '').toString().trim()));
+// CSV đơn giản: không header, phân cách dấu phẩy
+const trim = (s: any) => (typeof s === 'string' ? s.trim() : s ?? '');
+function parseCSV(txt: string): string[][] {
+  return txt
+    .replace(/^\uFEFF/, '')           // bỏ BOM nếu có
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => l.split(',').map((x) => x.trim()));
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
-    const framework_id = (form.get('framework_id') || '').toString().trim();
-    const kind = (form.get('kind') || '').toString().trim();
-    const file = form.get('file');
+    const framework_id = String(form.get('framework_id') || '');
+    const kind = String(form.get('kind') || '');
+    const file = form.get('file') as File | null;
 
-    if (!framework_id) {
-      return NextResponse.json({ error: 'Thiếu framework_id' }, { status: 400 });
+    if (!framework_id) return NextResponse.json({ error: 'Missing framework_id' }, { status: 400 });
+    if (!file) return NextResponse.json({ error: 'Missing file' }, { status: 400 });
+
+    const rows = parseCSV(await file.text());
+
+    switch (kind) {
+      case 'plo': {
+        // 2 cột: code, description
+        const payload = rows.map((r, i) => {
+          const code = trim(r[0]); if (!code) throw new Error(`PLO: thiếu code ở dòng ${i + 1}`);
+          const description = r[1] ?? null;
+          return { framework_id, code, description };
+        });
+        const { error } = await supabase
+          .from('plos')
+          .upsert(payload, { onConflict: 'framework_id,code' });
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      case 'pi': {
+        // 2 cột: code, description
+        const payload = rows.map((r, i) => {
+          const code = trim(r[0]); if (!code) throw new Error(`PI: thiếu code ở dòng ${i + 1}`);
+          const description = r[1] ?? null;
+          return { framework_id, code, description };
+        });
+        const { error } = await supabase
+          .from('pis')
+          .upsert(payload, { onConflict: 'framework_id,code' });
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      case 'courses': {
+        // 2-3 cột: course_code, course_name, [credits]
+        const payload = rows.map((r, i) => {
+          const course_code = trim(r[0]); if (!course_code) throw new Error(`Course: thiếu course_code ở dòng ${i + 1}`);
+          const course_name = r[1] ?? null;
+          const creditsRaw = r[2]; const credits = creditsRaw == null || creditsRaw === '' ? null : Number(creditsRaw);
+          return { framework_id, course_code, course_name, credits };
+        });
+        const { error } = await supabase
+          .from('courses')
+          .upsert(payload, { onConflict: 'framework_id,course_code' });
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      case 'clos': {
+        // 3 cột: course_code, clo_code, clo_text  (YÊU CẦU MỚI)
+        const payload = rows.map((r, i) => {
+          const course_code = trim(r[0]);
+          const clo_code    = trim(r[1]);
+          const clo_text    = r[2] ?? null;
+          if (!course_code || !clo_code) throw new Error(`CLO: thiếu dữ liệu ở dòng ${i + 1}`);
+          return { framework_id, course_code, clo_code, clo_text };
+        });
+        const { error } = await supabase
+          .from('clos')
+          .upsert(payload, { onConflict: 'framework_id,course_code,clo_code' });
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      case 'plo_pi': {
+        // 2 cột: plo_code, pi_code
+        const payload = rows.map((r, i) => {
+          const plo_code = trim(r[0]);
+          const pi_code  = trim(r[1]);
+          if (!plo_code || !pi_code) throw new Error(`PLO–PI: thiếu dữ liệu ở dòng ${i + 1}`);
+          return { framework_id, plo_code, pi_code };
+        });
+        // nếu bảng chưa có unique constraint, insert sẽ chấp nhận trùng
+        const { error } = await supabase.from('plo_pi_links').insert(payload);
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      case 'plo_clo': {
+        // 4 cột: plo_code, course_code, clo_code, level
+        const payload = rows.map((r, i) => {
+          const plo_code    = trim(r[0]);
+          const course_code = trim(r[1]);
+          const clo_code    = trim(r[2]);
+          const level       = r[3] ?? null;
+          if (!plo_code || !course_code || !clo_code) throw new Error(`PLO–CLO: thiếu dữ liệu ở dòng ${i + 1}`);
+          return { framework_id, plo_code, course_code, clo_code, level };
+        });
+        const { error } = await supabase.from('plo_clo_links').insert(payload);
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      case 'pi_clo': {
+        // 4 cột: pi_code, course_code, clo_code, level
+        const payload = rows.map((r, i) => {
+          const pi_code     = trim(r[0]);
+          const course_code = trim(r[1]);
+          const clo_code    = trim(r[2]);
+          const level       = r[3] ?? null;
+          if (!pi_code || !course_code || !clo_code) throw new Error(`PI–CLO: thiếu dữ liệu ở dòng ${i + 1}`);
+          return { framework_id, pi_code, course_code, clo_code, level };
+        });
+        const { error } = await supabase.from('pi_clo_links').insert(payload);
+        if (error) throw error;
+        return NextResponse.json({ ok: true, inserted: payload.length });
+      }
+
+      default:
+        return NextResponse.json({ error: `Unsupported kind=${kind}` }, { status: 400 });
     }
-    if (!kind) {
-      return NextResponse.json({ error: 'Thiếu kind' }, { status: 400 });
-    }
-    if (!(file instanceof Blob)) {
-      return NextResponse.json({ error: 'Thiếu file' }, { status: 400 });
-    }
-
-    const text = await (file as any).text();
-    const rows = parseCsv(text);
-    if (!rows.length) {
-      return NextResponse.json({ error: 'CSV rỗng' }, { status: 400 });
-    }
-
-    const db = createServiceClient();
-
-    if (kind === 'plo') {
-      // 2 cột: code, description
-      const payload = rows.map(([code, description]) => ({
-        framework_id,
-        code,
-        description: description ?? null,
-      }));
-      const { error } = await db.from('plos').insert(payload);
-      if (error) throw error;
-
-    } else if (kind === 'pi') {
-      // 2 cột: code, description
-      const payload = rows.map(([code, description]) => ({
-        framework_id,
-        code,
-        description: description ?? null,
-      }));
-      const { error } = await db.from('pis').insert(payload);
-      if (error) throw error;
-
-    } else if (kind === 'courses') {
-      // 2–3 cột: course_code, course_name, [credits]
-      const payload = rows.map(([course_code, course_name, credits]) => ({
-        framework_id,
-        course_code,
-        course_name: course_name ?? null,
-        credits:
-          credits !== undefined && credits !== null && String(credits).trim() !== ''
-            ? Number(credits)
-            : null,
-      }));
-      const { error } = await db.from('courses').insert(payload);
-      if (error) throw error;
-
-    } else if (kind === 'plo_pi') {
-      // 2 cột: plo_code, pi_code
-      const payload = rows.map(([plo_code, pi_code]) => ({
-        framework_id,
-        plo_code,
-        pi_code,
-      }));
-      const { error } = await db.from('plo_pi_links').insert(payload);
-      if (error) throw error;
-
-    } else if (kind === 'plo_clo') {
-      // 4 cột: plo_code, course_code, clo_code, level
-      const payload = rows.map(([plo_code, course_code, clo_code, level]) => ({
-        framework_id,
-        plo_code,
-        course_code,
-        clo_code,
-        level: level ?? null,
-      }));
-      const { error } = await db.from('plo_clo_links').insert(payload);
-      if (error) throw error;
-
-    } else if (kind === 'pi_clo') {
-      // 4 cột: pi_code, course_code, clo_code, level
-      const payload = rows.map(([pi_code, course_code, clo_code, level]) => ({
-        framework_id,
-        pi_code,
-        course_code,
-        clo_code,
-        level: level ?? null,
-      }));
-      const { error } = await db.from('pi_clo_links').insert(payload);
-      if (error) throw error;
-
-    } else {
-      return NextResponse.json({ error: 'kind không hợp lệ' }, { status: 400 });
-    }
-
-    return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Upload lỗi' }, { status: 400 });
+    console.error('[UPLOAD] error', e);
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
