@@ -1,149 +1,112 @@
 // app/api/academic-affairs/graph/route.ts
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-import { NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabaseServer';
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const framework_id = searchParams.get('framework_id') || '';
+    const framework_id = searchParams.get('framework_id');
     if (!framework_id) {
-      return NextResponse.json({ error: 'Thiếu framework_id' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing framework_id' }, { status: 400 });
     }
 
-    const db = createServiceClient(); // service-role, bypass RLS
-
-    const [
-      plosRes,
-      pisRes,
-      ploPiRes,
-      ploCloRes,
-      piCloRes,
-    ] = await Promise.all([
-      db.from('plos')
-        .select('id, code, description')
-        .eq('framework_id', framework_id),
-
-      db.from('pis')
-        .select('id, code, description')
-        .eq('framework_id', framework_id),
-
-      db.from('plo_pi_links')
-        .select('id, plo_code, pi_code')
-        .eq('framework_id', framework_id),
-
-      db.from('plo_clo_links')
-        .select('id, plo_code, course_code, clo_code, level')
-        .eq('framework_id', framework_id),
-
-      db.from('pi_clo_links')
-        .select('id, pi_code, course_code, clo_code, level')
-        .eq('framework_id', framework_id),
+    // Load danh mục nền
+    const [plosRes, pisRes, coursesRes, closRes] = await Promise.all([
+      supabase.from('plos').select('code, description').eq('framework_id', framework_id),
+      supabase.from('pis').select('code, description').eq('framework_id', framework_id),
+      supabase.from('courses').select('course_code, course_name, credits').eq('framework_id', framework_id),
+      supabase.from('clos').select('course_code, clo_code, clo_text').eq('framework_id', framework_id),
     ]);
 
-    const err = plosRes.error || pisRes.error || ploPiRes.error || ploCloRes.error || piCloRes.error;
-    if (err) {
-      return NextResponse.json({ error: err.message }, { status: 400 });
+    for (const r of [plosRes, pisRes, coursesRes, closRes]) {
+      if (r.error) throw r.error;
     }
 
-    const plos = plosRes.data ?? [];
-    const pis = pisRes.data ?? [];
-    const plo_pi = ploPiRes.data ?? [];
-    const plo_clo = ploCloRes.data ?? [];
-    const pi_clo = piCloRes.data ?? [];
+    const plos    = plosRes.data   ?? [];
+    const pis     = pisRes.data    ?? [];
+    const courses = coursesRes.data ?? [];
+    const clos    = closRes.data   ?? [];
 
-    const nodes: any[] = [];
-    const edges: any[] = [];
-
-    const ensureNode = (id: string, group: string, label?: string) => {
-      if (!nodes.find((n) => n.data.id === id)) {
-        nodes.push({ data: { id, group, label: label || id } });
-      }
-    };
-
-    for (const p of plos) {
-      nodes.push({
+    // Build nodes
+    const nodes: any[] = [
+      ...plos.map((p: any) => ({
         data: {
           id: `PLO:${p.code}`,
-          label: p.code,
-          group: 'PLO',
-          description: p.description ?? '',
+          label: p.description ? `PLO ${p.code}\n${p.description}` : `PLO ${p.code}`,
         },
-      });
-    }
-
-    for (const p of pis) {
-      nodes.push({
+        classes: 'type-plo',
+      })),
+      ...pis.map((p: any) => ({
         data: {
           id: `PI:${p.code}`,
-          label: p.code,
-          group: 'PI',
-          description: p.description ?? '',
+          label: p.description ? `PI ${p.code}\n${p.description}` : `PI ${p.code}`,
         },
-      });
+        classes: 'type-pi',
+      })),
+      ...courses.map((c: any) => ({
+        data: {
+          id: `COURSE:${c.course_code}`,
+          label: c.course_name ? `${c.course_code}\n${c.course_name}` : `${c.course_code}`,
+        },
+        classes: 'type-course',
+      })),
+      ...clos.map((c: any) => ({
+        data: {
+          id: `CLO:${c.course_code}:${c.clo_code}`,
+          label: c.clo_text ? `${c.clo_code}\n${c.clo_text}` : `${c.clo_code}`,
+        },
+        classes: 'type-clo',
+      })),
+    ];
+
+    // Load link tables
+    const [ppRes, pcRes, icRes] = await Promise.all([
+      supabase.from('plo_pi_links').select('plo_code, pi_code').eq('framework_id', framework_id),
+      supabase.from('plo_clo_links').select('plo_code, course_code, clo_code, level').eq('framework_id', framework_id),
+      supabase.from('pi_clo_links').select('pi_code, course_code, clo_code, level').eq('framework_id', framework_id),
+    ]);
+
+    for (const r of [ppRes, pcRes, icRes]) {
+      if (r.error) throw r.error;
     }
 
-    for (const l of plo_pi) {
-      ensureNode(`PLO:${l.plo_code}`, 'PLO', l.plo_code);
-      ensureNode(`PI:${l.pi_code}`, 'PI', l.pi_code);
-      edges.push({
+    const pp = ppRes.data ?? [];
+    const pc = pcRes.data ?? [];
+    const ic = icRes.data ?? [];
+
+    // Build edges (ID duy nhất để Cytoscape ổn định)
+    const edges: any[] = [
+      ...pp.map((e: any) => ({
         data: {
-          id: `edge:plo-pi:${l.id}`,
-          source: `PLO:${l.plo_code}`,
-          target: `PI:${l.pi_code}`,
+          id: `E:PLOPI:${e.plo_code}->${e.pi_code}`,
+          source: `PLO:${e.plo_code}`,
+          target: `PI:${e.pi_code}`,
           kind: 'PLO–PI',
         },
-      });
-    }
+      })),
+      ...pc.map((e: any) => ({
+        data: {
+          id: `E:PLOCLO:${e.plo_code}->${e.course_code}:${e.clo_code}`,
+          source: `PLO:${e.plo_code}`,
+          target: `CLO:${e.course_code}:${e.clo_code}`,
+          kind: e.level ? `PLO–CLO (${e.level})` : 'PLO–CLO',
+        },
+      })),
+      ...ic.map((e: any) => ({
+        data: {
+          id: `E:PICLO:${e.pi_code}->${e.course_code}:${e.clo_code}`,
+          source: `PI:${e.pi_code}`,
+          target: `CLO:${e.course_code}:${e.clo_code}`,
+          kind: e.level ? `PI–CLO (${e.level})` : 'PI–CLO',
+        },
+      })),
+    ];
 
-    for (const l of plo_clo) {
-      ensureNode(`PLO:${l.plo_code}`, 'PLO', l.plo_code);
-      ensureNode(`COURSE:${l.course_code}`, 'COURSE', l.course_code);
-      ensureNode(`CLO:${l.course_code}:${l.clo_code}`, 'CLO', l.clo_code);
-      edges.push({
-        data: {
-          id: `edge:plo-clo:${l.id}:1`,
-          source: `COURSE:${l.course_code}`,
-          target: `CLO:${l.course_code}:${l.clo_code}`,
-          kind: `CLO of ${l.course_code}`,
-        },
-      });
-      edges.push({
-        data: {
-          id: `edge:plo-clo:${l.id}:2`,
-          source: `PLO:${l.plo_code}`,
-          target: `CLO:${l.course_code}:${l.clo_code}`,
-          kind: `PLO–CLO (${l.level})`,
-        },
-      });
-    }
-
-    for (const l of pi_clo) {
-      ensureNode(`PI:${l.pi_code}`, 'PI', l.pi_code);
-      ensureNode(`COURSE:${l.course_code}`, 'COURSE', l.course_code);
-      ensureNode(`CLO:${l.course_code}:${l.clo_code}`, 'CLO', l.clo_code);
-      edges.push({
-        data: {
-          id: `edge:pi-clo:${l.id}:1`,
-          source: `COURSE:${l.course_code}`,
-          target: `CLO:${l.course_code}:${l.clo_code}`,
-          kind: `CLO of ${l.course_code}`,
-        },
-      });
-      edges.push({
-        data: {
-          id: `edge:pi-clo:${l.id}:2`,
-          source: `PI:${l.pi_code}`,
-          target: `CLO:${l.course_code}:${l.clo_code}`,
-          kind: `PI–CLO (${l.level})`,
-        },
-      });
-    }
-
-    return NextResponse.json({ elements: { nodes, edges } });
+    return NextResponse.json({ nodes, edges, elements: { nodes, edges } });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
+    console.error('[GRAPH] error', e);
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
