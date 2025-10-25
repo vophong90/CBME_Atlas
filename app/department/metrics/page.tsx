@@ -6,13 +6,13 @@ import { useDepartmentCtx } from '../context';
 
 type SumRow = { course_code: string; clo_code: string; total: number; achieved: number; not_yet: number };
 
-type HeatRow = { mssv: string; full_name: string };
+type HeatRow = { mssv: string; full_name?: string };
 type HeatCol = { key: string; course_code: string; clo_code: string; course_name?: string };
 
 export default function MetricsPage() {
   const { frameworkId, courseCode } = useDepartmentCtx();
 
-  // ===== Summary (bảng tổng hợp) =====
+  // ===== Summary =====
   const [items, setItems] = useState<SumRow[]>([]);
   async function loadMetrics() {
     if (!frameworkId) { setItems([]); return; }
@@ -20,7 +20,7 @@ export default function MetricsPage() {
     if (courseCode) p.set('course_code', courseCode);
     const res = await fetch(`/api/department/metrics?${p.toString()}`, { cache: 'no-store' });
     const js = await res.json();
-    if (res.ok) setItems(js.data || []);
+    setItems(res.ok ? (js.data || []) : []);
   }
   async function exportCSV() {
     if (!frameworkId) return alert('Chọn framework trước.');
@@ -46,14 +46,12 @@ export default function MetricsPage() {
   const [hCols, setHCols] = useState<HeatCol[]>([]);
   const [values, setValues] = useState<Record<string, Record<string, 1|0|null>>>({});
 
-  // load available CLOs khi thay danh sách học phần
   useEffect(() => {
     if (courseCode && !courses.length) setCourses([courseCode]);
-  }, [courseCode]); // chỉ sync mặc định 1 lần
+  }, [courseCode]);
 
   async function fetchAvailableCols() {
     if (!frameworkId || courses.length === 0) { setAvailableCols([]); setPickedCols([]); return; }
-    // gọi heatmap mà không truyền columns -> server trả cols theo data hiện có
     setLoadingHeat(true);
     try {
       const res = await fetch('/api/department/metrics/heatmap', {
@@ -63,8 +61,9 @@ export default function MetricsPage() {
       });
       const js = await res.json();
       if (res.ok) {
-        setAvailableCols(js.data?.cols || []);
-        setPickedCols((js.data?.cols || []).map((c: HeatCol) => c.key)); // mặc định chọn tất cả
+        const cols = js.data?.cols || [];
+        setAvailableCols(cols);
+        setPickedCols(cols.map((c: HeatCol) => c.key));
       } else {
         setAvailableCols([]); setPickedCols([]);
       }
@@ -129,14 +128,13 @@ export default function MetricsPage() {
         </table>
       </div>
 
-      {/* ===== Heatmap ===== */}
+      {/* ===== Heatmap (chỉ MSSV × CLO, bỏ cột Họ tên) ===== */}
       <div className="space-y-3">
         <div className="flex flex-col gap-2 rounded-lg border p-3 md:flex-row md:items-center md:justify-between">
           <div className="text-base font-semibold">Heatmap theo MSSV × CLO</div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* nhập nhiều học phần bằng dấu phẩy */}
             <input
-              placeholder="Nhập nhiều mã học phần (phân cách bởi dấu phẩy)"
+              placeholder="Nhập nhiều mã học phần (phân cách dấu phẩy)"
               className="w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 md:w-96"
               value={courses.join(',')}
               onChange={(e) => setCourses(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
@@ -144,13 +142,13 @@ export default function MetricsPage() {
             <button onClick={fetchAvailableCols} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
               Lấy danh sách CLO
             </button>
-            <button onClick={loadHeatmap} disabled={pickedCount===0 || loadingHeat} className={`rounded-lg px-3 py-2 text-white ${pickedCount===0 || loadingHeat ? 'bg-gray-300 cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700'}`}>
+            <button onClick={loadHeatmap} disabled={pickedCount===0 || loadingHeat}
+              className={`rounded-lg px-3 py-2 text-white ${pickedCount===0 || loadingHeat ? 'bg-gray-300 cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700'}`}>
               {loadingHeat ? 'Đang tải…' : `Vẽ heatmap (${pickedCount})`}
             </button>
           </div>
         </div>
 
-        {/* danh sách CLO có thể chọn */}
         {availableCols.length > 0 && (
           <div className="rounded-lg border p-3">
             <div className="mb-2 text-sm font-medium">Chọn CLO muốn hiển thị:</div>
@@ -173,14 +171,12 @@ export default function MetricsPage() {
           </div>
         )}
 
-        {/* bảng heatmap */}
         {hCols.length > 0 && (
           <div className="overflow-auto rounded border">
-            <table className="w-full min-w-[960px] text-sm">
+            <table className="w-full min-w-[800px] text-sm">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="sticky left-0 z-10 border-b bg-gray-50 px-3 py-2 text-left">MSSV</th>
-                  <th className="sticky left-[140px] z-10 hidden border-b bg-gray-50 px-3 py-2 text-left sm:table-cell">Họ tên</th>
                   {hCols.map(c => (
                     <th key={c.key} className="border-b px-3 py-2 text-left">
                       <div className="text-[11px] opacity-70">{c.course_code}</div>
@@ -193,7 +189,6 @@ export default function MetricsPage() {
                 {hRows.map(r => (
                   <tr key={r.mssv} className="odd:bg-gray-50">
                     <td className="sticky left-0 z-10 border-b bg-white px-3 py-2">{r.mssv}</td>
-                    <td className="sticky left-[140px] z-10 hidden border-b bg-white px-3 py-2 sm:table-cell">{r.full_name || '—'}</td>
                     {hCols.map(c => {
                       const v = values?.[r.mssv]?.[c.key] ?? null;
                       const cls =
@@ -205,7 +200,7 @@ export default function MetricsPage() {
                   </tr>
                 ))}
                 {hRows.length === 0 && (
-                  <tr><td colSpan={2 + hCols.length} className="px-3 py-6 text-center text-gray-500">Chưa có dữ liệu.</td></tr>
+                  <tr><td colSpan={1 + hCols.length} className="px-3 py-6 text-center text-gray-500">Chưa có dữ liệu.</td></tr>
                 )}
               </tbody>
             </table>
