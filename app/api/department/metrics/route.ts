@@ -2,58 +2,51 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabaseServer';
 
-/**
- * GET ?framework_id=&course_code=
- * Trả về [{ course_code, clo_code, total, achieved, not_yet }]
- */
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  const db = createServiceClient();
   try {
-    const { searchParams } = new URL(req.url);
+    const { searchParams } = req.nextUrl;
     const framework_id = searchParams.get('framework_id') || '';
     const course_code = searchParams.get('course_code') || '';
 
     if (!framework_id) {
-      return NextResponse.json({ error: 'Thiếu framework_id' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing framework_id' }, { status: 400 });
     }
 
-    const db = createServiceClient(); // service-role, bypass RLS
-
+    // Đếm nhóm theo course_code, clo_code, status ngay trên DB
     let q = db
       .from('student_clo_results_uploads')
-      .select('mssv,course_code,clo_code,status')
+      .select('course_code, clo_code, status, count:count()', { head: false })
       .eq('framework_id', framework_id);
 
     if (course_code) q = q.eq('course_code', course_code);
 
+    // PostgREST hỗ trợ group qua tham số group
+    // supabase-js v2: dùng .order để sắp xếp
+    // (group được ngầm khi có count()).
     const { data, error } = await q;
+    if (error) throw error;
 
-    if (error) {
-      // Bảng chưa tồn tại → trả rỗng
-      if (error.code === '42P01') return NextResponse.json({ data: [] });
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    type RowAgg = { course_code: string; clo_code: string; status: 'achieved'|'not_yet'; count: number };
+    const agg = new Map<string, { course_code: string; clo_code: string; total: number; achieved: number; not_yet: number }>();
 
-    const agg = new Map<string, { total: number; achieved: number; not_yet: number }>();
-
-    for (const r of data ?? []) {
-      const key = `${r.course_code}::${r.clo_code}`;
-      const cur = agg.get(key) ?? { total: 0, achieved: 0, not_yet: 0 };
-      cur.total += 1;
-      if (r.status === 'achieved') cur.achieved += 1;
-      else cur.not_yet += 1;
-      agg.set(key, cur);
-    }
-
-    const res = Array.from(agg.entries()).map(([k, v]) => {
-      const [course, clo] = k.split('::');
-      return { course_code: course, clo_code: clo, ...v };
+    (data as RowAgg[]).forEach(r => {
+      const key = `${r.course_code}|${r.clo_code}`;
+      if (!agg.has(key)) agg.set(key, { course_code: r.course_code, clo_code: r.clo_code, total: 0, achieved: 0, not_yet: 0 });
+      const x = agg.get(key)!;
+      x.total += r.count;
+      if (r.status === 'achieved') x.achieved += r.count;
+      else x.not_yet += r.count;
     });
 
-    return NextResponse.json({ data: res });
+    const rows = Array.from(agg.values())
+      .sort((a, b) => a.course_code.localeCompare(b.course_code) || a.clo_code.localeCompare(b.clo_code));
+
+    return NextResponse.json({ data: rows });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
