@@ -2,107 +2,67 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabaseServer';
 
-/**
- * POST { framework_id, course_code }
- * Trả CSV: MSSV,CourseCode,CLO1,CLO2,... (giá trị: achieved|not_yet)
- */
 export async function POST(req: Request) {
+  const db = createServiceClient();
   try {
-    const { framework_id, course_code } = (await req.json().catch(() => ({}))) as {
-      framework_id?: string;
-      course_code?: string;
-    };
+    const body = await req.json().catch(() => ({}));
+    const framework_id = String(body.framework_id || '');
+    const course_code  = body.course_code ? String(body.course_code) : '';
 
-    if (!framework_id || !course_code) {
-      return new Response(JSON.stringify({ error: 'Thiếu framework_id hoặc course_code' }), {
-        status: 400,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      });
+    if (!framework_id) {
+      return new NextResponse('Missing framework_id', { status: 400 });
     }
 
-    const db = createServiceClient(); // service-role, bypass RLS
-
-    const { data, error } = await db
+    // Lấy uploads
+    let q = db
       .from('student_clo_results_uploads')
-      .select('mssv,course_code,clo_code,status')
-      .eq('framework_id', framework_id)
-      .eq('course_code', course_code)
-      .order('mssv', { ascending: true });
+      .select('mssv, course_code, clo_code, status, updated_at')
+      .eq('framework_id', framework_id);
+    if (course_code) q = q.eq('course_code', course_code);
 
-    if (error) {
-      // Bảng không tồn tại -> trả CSV rỗng với header tối thiểu
-      if (error.code === '42P01') {
-        const empty = 'MSSV,CourseCode\n';
-        return new Response(empty, {
-          status: 200,
-          headers: {
-            'content-type': 'text/csv; charset=utf-8',
-            'content-disposition': `attachment; filename="results_${course_code}.csv"`,
-          },
-        });
-      }
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      });
-    }
+    const { data: uploads, error } = await q;
+    if (error) throw error;
 
-    // Gom cột
-    const rows = data ?? [];
-    const mssvSet = new Set<string>();
-    const cloSet = new Set<string>();
-    for (const r of rows) {
-      if (r?.mssv) mssvSet.add(String(r.mssv));
-      if (r?.clo_code) cloSet.add(String(r.clo_code));
-    }
+    // Map tên SV & tên học phần (join mềm)
+    const [studentsRes, coursesRes] = await Promise.all([
+      db.from('students').select('mssv, full_name').eq('framework_id', framework_id),
+      db.from('courses').select('course_code, course_name').eq('framework_id', framework_id),
+    ]);
 
-    const cloList = Array.from(cloSet).sort();
-    const header = ['MSSV', 'CourseCode', ...cloList];
+    const nameByMssv = new Map<string, string>();
+    (studentsRes.data || []).forEach(s => { if (s.mssv) nameByMssv.set(s.mssv, s.full_name || ''); });
 
-    const byKey = new Map<string, string>();
-    for (const r of rows) {
-      const key = `${String(r.mssv)}::${String(r.clo_code)}`;
-      byKey.set(key, String(r.status ?? 'not_yet'));
-    }
+    const courseNameByCode = new Map<string, string>();
+    (coursesRes.data || []).forEach(c => courseNameByCode.set(c.course_code, c.course_name || ''));
 
-    // CSV
-    const lines: string[] = [];
-    lines.push(header.join(','));
+    const header = ['MSSV', 'Họ tên', 'Mã học phần', 'Tên học phần', 'Mã CLO', 'Kết quả', 'Cập nhật'];
+    const lines = [header.join(',')];
 
-    const mssvList = Array.from(mssvSet).sort();
-    for (const mssv of mssvList) {
-      const rowVals = [
-        mssv,
-        String(course_code),
-        ...cloList.map((c) => byKey.get(`${mssv}::${c}`) || 'not_yet'),
+    (uploads || []).forEach(r => {
+      const row = [
+        r.mssv,
+        (nameByMssv.get(r.mssv) || '').replace(/,/g, ' '),
+        r.course_code,
+        (courseNameByCode.get(r.course_code) || '').replace(/,/g, ' '),
+        r.clo_code,
+        r.status,
+        r.updated_at ? new Date(r.updated_at).toISOString() : '',
       ];
-      // escape đơn giản với dấu ngoặc kép cho giá trị có dấu phẩy/ngoặc kép
-      const safe = rowVals.map((x) =>
-        x.includes(',') || x.includes('"') ? `"${x.replace(/"/g, '""')}"` : x
-      );
-      lines.push(safe.join(','));
-    }
-
-    // Nếu không có dòng dữ liệu, vẫn trả header
-    if (mssvList.length === 0) {
-      // thêm một dòng ví dụ? để trống theo yêu cầu
-    }
+      lines.push(row.map(v => `"${(v ?? '').toString().replace(/"/g, '""')}"`).join(','));
+    });
 
     const csv = lines.join('\n');
-
-    return new Response(csv, {
+    return new NextResponse(csv, {
       status: 200,
       headers: {
         'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': `attachment; filename="results_${course_code}.csv"`,
+        'content-disposition': `attachment; filename="results_${course_code || 'all'}.csv"`,
       },
     });
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: e?.message ?? 'Server error' }), {
-      status: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-    });
+    return new NextResponse(e?.message || 'Export error', { status: 500 });
   }
 }
