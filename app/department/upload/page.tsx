@@ -28,7 +28,7 @@ export default function UploadPage() {
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<ResultRow[]>([]);
-  const [keyword, setKeyword] = useState(''); // MSSV hoặc Họ tên
+  const [keyword, setKeyword] = useState(''); // MSSV / Họ tên
 
   // ===== upload CSV =====
   async function doUpload() {
@@ -51,13 +51,12 @@ export default function UploadPage() {
     }
   }
 
-  // ===== list uploads (lọc theo framework + courseCode từ header) =====
+  // ===== list uploads (theo framework + course đã chọn ở header) =====
   async function listUploads() {
     if (!frameworkId) { setRows([]); return; }
     const p = new URLSearchParams();
     p.set('framework_id', frameworkId);
     if (courseCode) p.set('course_code', courseCode);
-
     const res = await fetch(`/api/department/results/list?${p.toString()}`, { cache: 'no-store' });
     const js = await res.json();
     if (res.ok) setRows(js.data || []);
@@ -65,7 +64,7 @@ export default function UploadPage() {
   }
   useEffect(() => { listUploads(); /* eslint-disable-next-line */ }, [frameworkId, courseCode]);
 
-  // ===== client-side filter theo MSSV hoặc Họ tên =====
+  // ===== client filter =====
   const filtered = useMemo(() => {
     const kw = (keyword || '').toLowerCase().trim();
     if (!kw) return rows;
@@ -90,7 +89,6 @@ export default function UploadPage() {
       alert(e?.message || 'Cập nhật lỗi');
     }
   }
-
   async function deleteRow(id: string) {
     if (!confirm('Xoá dòng này?')) return;
     try {
@@ -105,45 +103,68 @@ export default function UploadPage() {
 
   return (
     <section className="space-y-4 rounded-xl border bg-white p-5 shadow-sm">
-      {/* header + hướng dẫn */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      {/* Title + small help note */}
+      <div>
         <h2 className="text-lg font-semibold">Tải lên kết quả đo lường CLO</h2>
-        <div className="text-xs text-slate-600 md:text-right">
+        <p className="mt-1 text-xs text-slate-600">
           CSV cột: <b>MSSV, Mã học phần, Mã CLO, Kết quả (Đạt|Không đạt)</b> • cũng chấp nhận <i>achieved/not_yet</i>.
-        </div>
+        </p>
       </div>
 
-      {/* hàng điều khiển: 2 cột gọn, tránh “vỡ” */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 items-start">
-        {/* cột 1-2: file + nút */}
-        <div className="md:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+      {/* Toolbar gọn, 2 bên rõ ràng */}
+      <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 md:flex-row md:items-center md:justify-between">
+        {/* Left group: file chooser + file name + upload */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* custom small file button */}
           <input
+            id="csvFile"
             type="file"
             accept=".csv"
+            className="sr-only"
             onChange={(e) => setPickedFile(e.target.files?.[0] || null)}
-            className="block w-full bg-white text-slate-900"
             disabled={!frameworkId}
           />
+          <label
+            htmlFor="csvFile"
+            className={[
+              'inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm',
+              !frameworkId ? 'pointer-events-none opacity-50' : 'hover:bg-gray-50'
+            ].join(' ')}
+          >
+            Chọn tệp CSV
+          </label>
+
+          <span className="max-w-[260px] truncate text-xs text-slate-600">
+            {pickedFile ? pickedFile.name : 'Chưa chọn tệp'}
+          </span>
+
           <button
             onClick={doUpload}
             disabled={!frameworkId || !pickedFile || loading}
-            className={`px-4 py-2 rounded-lg text-white ${(!frameworkId || !pickedFile || loading)
-              ? 'bg-gray-300 cursor-not-allowed'
-              : 'bg-brand-600 hover:bg-brand-700'}`}
+            className={[
+              'rounded-lg px-3 py-2 text-sm text-white',
+              (!frameworkId || !pickedFile || loading)
+                ? 'bg-gray-300 cursor-not-allowed'
+                : 'bg-brand-600 hover:bg-brand-700'
+            ].join(' ')}
           >
-            {loading ? 'Đang tải...' : 'Tải lên'}
+            {loading ? 'Đang tải…' : 'Tải lên'}
           </button>
         </div>
 
-        {/* cột 3: chỉ còn ô tìm theo MSSV/Họ tên + nút làm mới */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        {/* Right group: search + refresh */}
+        <div className="flex items-center gap-2">
           <input
             placeholder="Tìm MSSV / Họ tên"
-            className="w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 sm:w-64"
+            className="w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 md:w-64"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
-          <button onClick={listUploads} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
+          <button
+            onClick={listUploads}
+            title="Làm mới"
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
+          >
             Làm mới
           </button>
         </div>
@@ -153,9 +174,9 @@ export default function UploadPage() {
         Đang có <b>{filtered.length}</b> dòng khớp bộ lọc{courseCode ? <> (Học phần: <i>{courseCode}</i>)</> : null}.
       </div>
 
-      {/* bảng: giữ min width để không “bể” cột */}
-      <div className="overflow-auto border rounded">
-        <table className="min-w-[920px] w-full text-sm">
+      {/* Table */}
+      <div className="overflow-auto rounded border">
+        <table className="w-full min-w-[920px] text-sm">
           <thead className="bg-gray-50">
             <tr>
               {['MSSV','Họ tên sinh viên','Học phần','Mã CLO','Kết quả','Cập nhật',''].map((h) => (
@@ -168,9 +189,7 @@ export default function UploadPage() {
               <tr key={r.id} className="odd:bg-gray-50">
                 <td className="border-b px-3 py-2">{r.mssv}</td>
                 <td className="border-b px-3 py-2">{r.student_full_name || '—'}</td>
-                <td className="border-b px-3 py-2">
-                  {r.course_code} — {r.course_name || '—'}
-                </td>
+                <td className="border-b px-3 py-2">{r.course_code} — {r.course_name || '—'}</td>
                 <td className="border-b px-3 py-2">{r.clo_code}</td>
                 <td className="border-b px-3 py-2">
                   <select
