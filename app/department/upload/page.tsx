@@ -1,3 +1,4 @@
+// app/department/upload/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -14,8 +15,6 @@ type ResultRow = {
   updated_at?: string | null;
 };
 
-type CourseOpt = { course_code: string; course_name?: string | null };
-
 function normalizeResult(input: string): 'achieved' | 'not_yet' {
   const s = (input || '').toLowerCase().trim();
   if (['achieved','đạt','dat','pass','passed','1','true'].includes(s)) return 'achieved';
@@ -24,32 +23,12 @@ function normalizeResult(input: string): 'achieved' | 'not_yet' {
 const labelStatus = (s: 'achieved' | 'not_yet') => (s === 'achieved' ? 'Đạt' : 'Không đạt');
 
 export default function UploadPage() {
-  const { frameworkId } = useDepartmentCtx();
+  const { frameworkId, courseCode } = useDepartmentCtx();
 
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [uploaded, setUploaded] = useState<ResultRow[]>([]);
-  const [uploadedCount, setUploadedCount] = useState(0);
-
-  const [courses, setCourses] = useState<CourseOpt[]>([]);
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [mssvFilter, setMssvFilter] = useState('');
-
-  // ===== load courses cho dropdown =====
-  useEffect(() => {
-    async function loadCourses() {
-      if (!frameworkId) { setCourses([]); setSelectedCourse(''); return; }
-      const p = new URLSearchParams({ framework_id: frameworkId });
-      const res = await fetch(`/api/department/courses?${p.toString()}`, { cache: 'no-store' });
-      const js = await res.json();
-      if (res.ok && Array.isArray(js.data)) {
-        setCourses(js.data);
-      } else {
-        setCourses([]);
-      }
-    }
-    loadCourses();
-  }, [frameworkId]);
+  const [rows, setRows] = useState<ResultRow[]>([]);
+  const [keyword, setKeyword] = useState(''); // MSSV hoặc Họ tên
 
   // ===== upload CSV =====
   async function doUpload() {
@@ -72,24 +51,29 @@ export default function UploadPage() {
     }
   }
 
-  // ===== list uploads =====
+  // ===== list uploads (lọc theo framework + courseCode từ header) =====
   async function listUploads() {
-    if (!frameworkId) { setUploaded([]); setUploadedCount(0); return; }
+    if (!frameworkId) { setRows([]); return; }
     const p = new URLSearchParams();
     p.set('framework_id', frameworkId);
-    if (selectedCourse) p.set('course_code', selectedCourse);
-    if (mssvFilter) p.set('mssv', mssvFilter.trim());
+    if (courseCode) p.set('course_code', courseCode);
 
     const res = await fetch(`/api/department/results/list?${p.toString()}`, { cache: 'no-store' });
     const js = await res.json();
-    if (res.ok) {
-      setUploaded(js.data || []);
-      setUploadedCount(js.count || (js.data?.length ?? 0));
-    } else {
-      setUploaded([]); setUploadedCount(0);
-    }
+    if (res.ok) setRows(js.data || []);
+    else setRows([]);
   }
-  useEffect(() => { listUploads(); /* eslint-disable-next-line */ }, [frameworkId]);
+  useEffect(() => { listUploads(); /* eslint-disable-next-line */ }, [frameworkId, courseCode]);
+
+  // ===== client-side filter theo MSSV hoặc Họ tên =====
+  const filtered = useMemo(() => {
+    const kw = (keyword || '').toLowerCase().trim();
+    if (!kw) return rows;
+    return rows.filter(r =>
+      r.mssv?.toLowerCase().includes(kw) ||
+      (r.student_full_name || '').toLowerCase().includes(kw)
+    );
+  }, [rows, keyword]);
 
   // ===== inline update / delete =====
   async function updateResult(id: string, next: 'achieved' | 'not_yet') {
@@ -101,7 +85,7 @@ export default function UploadPage() {
       });
       const js = await res.json();
       if (!res.ok) throw new Error(js.error || 'Cập nhật lỗi');
-      setUploaded((prev) => prev.map((r) => (r.id === id ? { ...r, status: next, updated_at: new Date().toISOString() } : r)));
+      setRows(prev => prev.map(r => r.id === id ? { ...r, status: next, updated_at: new Date().toISOString() } : r));
     } catch (e: any) {
       alert(e?.message || 'Cập nhật lỗi');
     }
@@ -113,38 +97,31 @@ export default function UploadPage() {
       const res = await fetch(`/api/department/results/item?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const js = await res.json();
       if (!res.ok) throw new Error(js.error || 'Xoá lỗi');
-      setUploaded((prev) => prev.filter((r) => r.id !== id));
-      setUploadedCount((c) => Math.max(0, c - 1));
+      setRows(prev => prev.filter(r => r.id !== id));
     } catch (e: any) {
       alert(e?.message || 'Xoá lỗi');
     }
   }
 
-  const courseMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const c of courses) m.set(c.course_code, c.course_name || c.course_code);
-    return m;
-  }, [courses]);
-
   return (
-    <section className="rounded-xl border bg-white p-5 shadow-sm space-y-4">
-      {/* header + note: xếp ổn trên mọi kích thước */}
+    <section className="space-y-4 rounded-xl border bg-white p-5 shadow-sm">
+      {/* header + hướng dẫn */}
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <h2 className="text-lg font-semibold">Tải lên kết quả đo lường CLO</h2>
         <div className="text-xs text-slate-600 md:text-right">
-          CSV cột: <b>MSSV, Mã học phần, Mã CLO, Kết quả(Đạt|Không đạt)</b> • cũng chấp nhận <i>achieved/not_yet</i>.
+          CSV cột: <b>MSSV, Mã học phần, Mã CLO, Kết quả (Đạt|Không đạt)</b> • cũng chấp nhận <i>achieved/not_yet</i>.
         </div>
       </div>
 
-      {/* hàng điều khiển: chia 3 cột ổn định, không vỡ */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+      {/* hàng điều khiển: 2 cột gọn, tránh “vỡ” */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 items-start">
         {/* cột 1-2: file + nút */}
         <div className="md:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="file"
             accept=".csv"
             onChange={(e) => setPickedFile(e.target.files?.[0] || null)}
-            className="block w-full"
+            className="block w-full bg-white text-slate-900"
             disabled={!frameworkId}
           />
           <button
@@ -158,69 +135,65 @@ export default function UploadPage() {
           </button>
         </div>
 
-        {/* cột 3: filter */}
+        {/* cột 3: chỉ còn ô tìm theo MSSV/Họ tên + nút làm mới */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
           <input
-            placeholder="Lọc MSSV"
-            className="border rounded-lg px-3 py-2 text-sm w-full sm:w-40"
-            value={mssvFilter}
-            onChange={(e) => setMssvFilter(e.target.value)}
+            placeholder="Tìm MSSV / Họ tên"
+            className="w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 sm:w-64"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
           />
-          <select
-            className="border rounded-lg px-3 py-2 text-sm w-full sm:w-56"
-            value={selectedCourse}
-            onChange={(e) => setSelectedCourse(e.target.value)}
-          >
-            <option value="">— Tất cả học phần —</option>
-            {courses.map((c) => (
-              <option key={c.course_code} value={c.course_code}>
-                {c.course_code} — {c.course_name || c.course_code}
-              </option>
-            ))}
-          </select>
-          <button onClick={listUploads} className="px-3 py-2 rounded-lg border hover:bg-gray-50">Làm mới</button>
+          <button onClick={listUploads} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
+            Làm mới
+          </button>
         </div>
       </div>
 
-      <div className="text-sm text-slate-600">Đang có <b>{uploadedCount}</b> dòng khớp bộ lọc.</div>
+      <div className="text-sm text-slate-600">
+        Đang có <b>{filtered.length}</b> dòng khớp bộ lọc{courseCode ? <> (Học phần: <i>{courseCode}</i>)</> : null}.
+      </div>
 
-      {/* bảng: chiều rộng tối thiểu để tránh “bể” cột */}
+      {/* bảng: giữ min width để không “bể” cột */}
       <div className="overflow-auto border rounded">
         <table className="min-w-[920px] w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
               {['MSSV','Họ tên sinh viên','Học phần','Mã CLO','Kết quả','Cập nhật',''].map((h) => (
-                <th key={h} className="px-3 py-2 text-left border-b">{h}</th>
+                <th key={h} className="border-b px-3 py-2 text-left">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {uploaded.map((r) => (
+            {filtered.map((r) => (
               <tr key={r.id} className="odd:bg-gray-50">
-                <td className="px-3 py-2 border-b">{r.mssv}</td>
-                <td className="px-3 py-2 border-b">{r.student_full_name || '—'}</td>
-                <td className="px-3 py-2 border-b">
-                  {r.course_code} — {r.course_name || courseMap.get(r.course_code) || '—'}
+                <td className="border-b px-3 py-2">{r.mssv}</td>
+                <td className="border-b px-3 py-2">{r.student_full_name || '—'}</td>
+                <td className="border-b px-3 py-2">
+                  {r.course_code} — {r.course_name || '—'}
                 </td>
-                <td className="px-3 py-2 border-b">{r.clo_code}</td>
-                <td className="px-3 py-2 border-b">
+                <td className="border-b px-3 py-2">{r.clo_code}</td>
+                <td className="border-b px-3 py-2">
                   <select
-                    className="border rounded px-2 py-1"
+                    className="rounded border bg-white px-2 py-1 text-slate-900"
                     value={r.status}
                     onChange={(e) => updateResult(r.id, normalizeResult(e.target.value))}
                   >
-                    <option value="achieved">{labelStatus('achieved')}</option>
-                    <option value="not_yet">{labelStatus('not_yet')}</option>
+                    <option value="achieved">Đạt</option>
+                    <option value="not_yet">Không đạt</option>
                   </select>
                 </td>
-                <td className="px-3 py-2 border-b">{r.updated_at ? new Date(r.updated_at).toLocaleString() : ''}</td>
-                <td className="px-3 py-2 border-b">
-                  <button className="text-red-600 hover:underline" onClick={() => deleteRow(r.id)}>Xoá</button>
+                <td className="border-b px-3 py-2">{r.updated_at ? new Date(r.updated_at).toLocaleString() : ''}</td>
+                <td className="border-b px-3 py-2">
+                  <button className="text-red-600 hover:underline" onClick={() => deleteRow(r.id)}>
+                    Xoá
+                  </button>
                 </td>
               </tr>
             ))}
-            {uploaded.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-500">Chưa có dữ liệu.</td></tr>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-6 text-center text-gray-500">Chưa có dữ liệu.</td>
+              </tr>
             )}
           </tbody>
         </table>
