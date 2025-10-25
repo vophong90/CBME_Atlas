@@ -26,6 +26,7 @@ const NAV = [
 
 function HeaderFilters() {
   const { frameworks, frameworkId, setFrameworkId, courses, courseCode, setCourseCode, formatFw } = useDepartmentCtx();
+
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -33,31 +34,43 @@ function HeaderFilters() {
           <h1 className="text-2xl font-semibold">Bộ môn</h1>
           <p className="text-sm text-slate-600">Quản lý kết quả đo lường, học phần, rubric & hộp thư góp ý.</p>
         </div>
-        <div className="grid md:grid-cols-2 gap-3 w-full md:w-auto">
+
+        <div className="grid w-full gap-3 md:w-auto md:grid-cols-2">
           <div>
-            <label className="block text-xs font-semibold mb-1">Khung chương trình</label>
+            <label className="mb-1 block text-xs font-semibold">Khung chương trình</label>
             <select
               value={frameworkId}
               onChange={(e) => setFrameworkId(e.target.value)}
-              className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300 min-w-[260px]"
+              className="min-w-[260px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
             >
               <option value="">— Chọn khung —</option>
               {frameworks.map((f) => (
-                <option key={f.id} value={f.id}>{formatFw(f) || f.id}</option>
+                <option key={f.id} value={f.id}>
+                  {formatFw(f) || f.id}
+                </option>
               ))}
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-semibold mb-1">Học phần</label>
+            <label className="mb-1 block text-xs font-semibold">Học phần</label>
             <select
               value={courseCode}
               onChange={(e) => setCourseCode(e.target.value)}
-              className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300 min-w-[220px]"
+              className="min-w-[220px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
             >
               <option value="">— Tất cả —</option>
-              {courses.map((c) => (
-                <option key={c.code} value={c.code}>{c.code}{c.name ? ` • ${c.name}` : ''}</option>
-              ))}
+              {courses.map((c: any) => {
+                // FIX: chấp nhận cả 2 shape {code,name} hoặc {course_code,course_name}
+                const code = c?.course_code ?? c?.code;
+                const name = c?.course_name ?? c?.name;
+                if (!code) return null;
+                return (
+                  <option key={code} value={code}>
+                    {code}{name ? ` • ${name}` : ''}
+                  </option>
+                );
+              })}
             </select>
           </div>
         </div>
@@ -86,7 +99,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
       <div className="mx-auto flex max-w-[1400px]">
         {/* Sidebar (desktop) */}
-        <aside className={['hidden md:flex md:sticky md:top-0 md:h-[100dvh] md:flex-col md:border-r md:border-slate-200 md:bg-white', collapsed?'md:w-16':'md:w-72'].join(' ')}>
+        <aside className={['hidden md:sticky md:top-0 md:h-[100dvh] md:w-72 md:flex md:flex-col md:border-r md:border-slate-200 md:bg-white', collapsed ? 'md:w-16' : 'md:w-72'].join(' ')}>
           <div className="flex items-center justify-between gap-2 p-3">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">BM</div>
             {!collapsed && <div className="text-sm font-semibold">Khu vực Bộ môn</div>}
@@ -157,7 +170,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         )}
 
         {/* Main */}
-        <main className="flex-1 p-6 space-y-6">
+        <main className="flex-1 space-y-6 p-6">
           <HeaderFilters />
           {children}
         </main>
