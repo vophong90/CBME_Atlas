@@ -1,78 +1,38 @@
 // lib/supabaseServer.ts
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-// -------- ENV helpers -------------------------------------------------------
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// -------- Read access token from cookies (for RLS-aware server client) ------
-function readAccessTokenFromCookies(): string | null {
+// SSR client: đọc/ghi cookie phiên người dùng (chuẩn, không cần tự parse tên cookie)
+export function getSupabase() {
   const store = cookies();
-
-  // 1) Supabase v2 cookie
-  const sb = store.get('sb-access-token')?.value;
-  if (sb) return sb;
-
-  // 2) Auth Helpers cookie: 'supabase-auth-token' = JSON ["access","refresh"]
-  const helpers = store.get('supabase-auth-token')?.value;
-  if (helpers) {
-    try {
-      const arr = JSON.parse(helpers);
-      if (Array.isArray(arr) && typeof arr[0] === 'string') return arr[0];
-    } catch {}
-  }
-
-  // 3) Legacy cookie: 'sb:token' = { access_token, refresh_token }
-  const legacy = store.get('sb:token')?.value;
-  if (legacy) {
-    try {
-      const obj = JSON.parse(legacy);
-      if (obj && typeof obj.access_token === 'string') return obj.access_token;
-    } catch {}
-  }
-
-  return null;
-}
-
-// -------- Admin client (service role) — bypass RLS --------------------------
-export function createServiceClient(): SupabaseClient {
-  const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const serviceKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
-  return createClient(url, serviceKey, {
-    auth: { persistSession: false },
-  });
-}
-
-/**
- * Optional singleton admin client.
- * Có thể là `undefined` ở build-time nếu thiếu ENV; code gọi cần kiểm tra tồn tại.
- */
-export const supabaseAdmin: SupabaseClient | undefined = (() => {
-  try {
-    return createServiceClient();
-  } catch {
-    return undefined;
-  }
-})();
-
-// -------- Server client theo user hiện tại (RLS bật) ------------------------
-export function getSupabase(): SupabaseClient {
-  const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const anonKey = requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-
-  const accessToken = readAccessTokenFromCookies();
-
-  return createClient(url, anonKey, {
-    auth: { persistSession: false },
-    global: {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    cookies: {
+      get(name: string) { return store.get(name)?.value; },
+      set(name: string, value: string, options: CookieOptions) {
+        try { store.set({ name, value, ...options }); } catch {}
+      },
+      remove(name: string, options: CookieOptions) {
+        try { store.set({ name, value: '', ...options, expires: new Date(0) }); } catch {}
+      },
     },
   });
 }
 
-// Alias để tương thích code cũ
-export const createServerClient = getSupabase;
+// Service client (server-only): bypass RLS
+export function createServiceClient(): SupabaseClient {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
+// Giữ tương thích ngược: instance admin
+export const supabaseAdmin: SupabaseClient = createClient(
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false } }
+);
