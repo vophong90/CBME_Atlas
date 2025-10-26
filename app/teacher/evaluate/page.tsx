@@ -12,8 +12,8 @@ type Student = { mssv: string; user_id: string; full_name?: string; cohort?: str
 type RubricColumn = { key: string; label: string; score?: number };
 type RubricItem = { id: string; label: string; clo_ids?: string[] };
 type Rubric = {
-  id: number;
-  name: string; // tiêu đề rubric
+  id: string; // UUID !!!
+  name: string;
   definition: { columns: RubricColumn[]; rows: RubricItem[] };
   framework_id?: string | null;
   course_code?: string | null;
@@ -33,7 +33,7 @@ type ObservationListItem = {
 
 type ObservationDetail = {
   id: string;
-  rubric_id: number;
+  rubric_id: string; // UUID !!!
   rubric_title?: string;
   course_code?: string | null;
   framework_id?: string | null;
@@ -60,7 +60,7 @@ export default function TeacherEvaluatePage() {
 
   /** ------- Rubrics ------- */
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
-  const [rubricId, setRubricId] = useState<number | null>(null);
+  const [rubricId, setRubricId] = useState<string>(''); // UUID
   const [rubric, setRubric] = useState<Rubric | null>(null);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingRubric, setLoadingRubric] = useState(false);
@@ -98,11 +98,11 @@ export default function TeacherEvaluatePage() {
 
   /** ========= When framework changes: load courses, reset downstream ========= */
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       setCourses([]);
       setCourseCode('');
       setRubrics([]);
-      setRubricId(null);
+      setRubricId('');
       setRubric(null);
       setItems({});
       setStudent(null);
@@ -113,13 +113,12 @@ export default function TeacherEvaluatePage() {
       const res = await fetch(`/api/department/courses?${p.toString()}`, { cache: 'no-store' });
       const js = await res.json();
       setCourses(res.ok ? (js.data || []) : []);
-    };
-    run();
+    })();
   }, [frameworkId]);
 
   /** ========= When framework/course changes: load rubrics list ========= */
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       setLoadingList(true);
       try {
         const p = new URLSearchParams();
@@ -131,13 +130,12 @@ export default function TeacherEvaluatePage() {
       } finally {
         setLoadingList(false);
       }
-    };
-    run();
+    })();
   }, [frameworkId, courseCode]);
 
   /** ========= Pick rubric: load detail, reset student + grading ========= */
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       setRubric(null);
       setItems({});
       setOverallComment('');
@@ -148,19 +146,18 @@ export default function TeacherEvaluatePage() {
       if (!rubricId) return;
       setLoadingRubric(true);
       try {
-        const r = await fetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' });
+        const r = await fetch(`/api/teacher/rubrics/${encodeURIComponent(rubricId)}`, { cache: 'no-store' });
         const d = await r.json();
         if (r.ok) setRubric(d.item || null);
       } finally {
         setLoadingRubric(false);
       }
-    };
-    run();
+    })();
   }, [rubricId]);
 
   /** ========= Load initial student dropdown (by framework) once rubric is chosen ========= */
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       if (!rubricId || !frameworkId) return;
       try {
         const p = new URLSearchParams({ framework_id: frameworkId, limit: '100' });
@@ -170,8 +167,7 @@ export default function TeacherEvaluatePage() {
       } catch {
         setStudentList([]);
       }
-    };
-    run();
+    })();
   }, [rubricId, frameworkId]);
 
   /** ========= History: list teacher's observations ========= */
@@ -228,8 +224,8 @@ export default function TeacherEvaluatePage() {
   async function submitObservation(status: 'draft' | 'submitted') {
     if (!rubric || !student) { alert('Chưa chọn Rubric / Sinh viên'); return; }
     const payload = {
-      id: editingObservationId || undefined,
-      rubric_id: rubric.id,
+      id: editingObservationId || undefined,     // nếu sửa thì gửi kèm id
+      rubric_id: rubric.id,                      // UUID !!!
       student_user_id: student.user_id,
       framework_id: frameworkId || null,
       course_code: courseCode || null,
@@ -250,7 +246,7 @@ export default function TeacherEvaluatePage() {
     if (!r.ok) { alert(d.error || 'Lỗi lưu đánh giá'); return; }
     alert(status === 'submitted' ? 'Đã gửi đánh giá & cập nhật kết quả SV' : (editingObservationId ? 'Đã cập nhật nháp' : 'Đã lưu nháp'));
     setEditingObservationId(null);
-    await Promise.all([loadHistory()]);
+    await loadHistory();
     // giữ nguyên rubric, reset chọn SV & form
     setStudentOpt(''); setStudent(null); setStudentQ(''); setItems({}); setOverallComment('');
   }
@@ -332,8 +328,8 @@ export default function TeacherEvaluatePage() {
           {/* Rubric dropdown (depends on framework + course) */}
           <select
             className="rounded-xl border border-slate-300 px-3 py-2"
-            value={rubricId ?? ''}
-            onChange={(e) => setRubricId(e.target.value ? Number(e.target.value) : null)}
+            value={rubricId}
+            onChange={(e) => setRubricId(e.target.value)}
             disabled={!frameworkId || !courseCode}
           >
             <option value="">-- Chọn rubric --</option>
@@ -386,7 +382,7 @@ export default function TeacherEvaluatePage() {
                   onKeyDown={(e) => { if (e.key === 'Enter') searchStudents(); }}
                 />
                 <button
-                  className="rounded-xl border border-slate-200 px-3 py-2 hover:bg-slate-50 whitespace-nowrap"
+                  className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 hover:bg-slate-50"
                   onClick={searchStudents}
                   disabled={searchingStu}
                 >
