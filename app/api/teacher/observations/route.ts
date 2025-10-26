@@ -1,65 +1,99 @@
+// app/api/teacher/observations/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { getSupabaseFromRequest, createServiceClient } from '@/lib/supabaseServer';
 
-type Item = { item_key: string; selected_level: string; score?: number | null; comment?: string | null; };
+type Item = {
+  item_key: string;
+  selected_level: string;
+  score?: number | null;
+  comment?: string | null;
+};
+
+/** Helper: tra course_id từ framework_id + course_code */
+async function resolveCourseId(supabase: any, framework_id?: string | null, course_code?: string | null) {
+  if (!framework_id || !course_code) return null;
+  const { data, error } = await supabase
+    .from('courses')
+    .select('id')
+    .eq('framework_id', framework_id)
+    .eq('course_code', course_code)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ?? null;
+}
 
 export async function GET(req: Request) {
   try {
     const supabase = getSupabaseFromRequest(req);
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-    if (authErr) return NextResponse.json({ error: authErr.message }, { status: 401 });
-    if (!user)   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const url = new URL(req.url);
     const framework_id = url.searchParams.get('framework_id') || undefined;
     const course_code  = url.searchParams.get('course_code')  || undefined;
     const q            = url.searchParams.get('q')            || undefined;
-    const mssv         = url.searchParams.get('mssv')         || undefined;
 
-    let base = supabase
-      .from('observations')
-      .select('id,rubric_id,student_user_id,status,total_score,course_code,framework_id,created_at,submitted_at')
-      .eq('teacher_user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (framework_id) base = base.eq('framework_id', framework_id);
-    if (course_code)  base = base.eq('course_code',  course_code);
-
-    const { data: obs, error: obsErr } = await base;
-    if (obsErr) return NextResponse.json({ error: obsErr.message }, { status: 400 });
-    if (!obs?.length) return NextResponse.json({ items: [] });
-
-    const studentIds = Array.from(new Set(obs.map(o => o.student_user_id).filter(Boolean))) as string[];
-    const rubricIds  = Array.from(new Set(obs.map(o => o.rubric_id).filter(Boolean))) as string[];
-
-    const { data: students } = await supabase.from('students').select('user_id,mssv,full_name').in('user_id', studentIds.length ? studentIds : ['___empty___']);
-    const { data: rubrics  } = await supabase.from('rubrics').select('id,title').in('id', rubricIds.length ? rubricIds : ['00000000-0000-0000-0000-000000000000']);
-
-    const stuMap = new Map((students||[]).map(s => [s.user_id, s]));
-    const rubMap = new Map((rubrics||[]).map(r => [r.id, r]));
-
-    let items = obs.map(o => ({
-      id: o.id,
-      created_at: o.created_at,
-      submitted_at: o.submitted_at,
-      status: o.status as 'draft'|'submitted',
-      total_score: o.total_score ?? null,
-      course_code: o.course_code ?? null,
-      framework_id: o.framework_id ?? null,
-      student_user_id: o.student_user_id,
-      student_mssv: stuMap.get(o.student_user_id)?.mssv ?? null,
-      student_full_name: stuMap.get(o.student_user_id)?.full_name ?? null,
-      rubric_id: o.rubric_id,
-      rubric_title: rubMap.get(o.rubric_id)?.title ?? '',
-    }));
-
-    if (mssv) {
-      const mm = mssv.toLowerCase();
-      items = items.filter(x => (x.student_mssv || '').toLowerCase().includes(mm));
+    // nếu có filter học phần, đổi sang course_id
+    let course_id: string | null = null;
+    if (framework_id && course_code) {
+      course_id = await resolveCourseId(supabase, framework_id, course_code);
+      if (!course_id) return NextResponse.json({ items: [] }); // không có học phần này
     }
+
+    // Lấy danh sách observation của GV hiện tại (RLS đã chặn theo rater_id rồi)
+    let obsQ = supabase
+      .from('observations')
+      .select('id, rubric_id, student_id, course_id, observed_at, note, kind')
+      .order('observed_at', { ascending: false });
+
+    if (course_id) obsQ = obsQ.eq('course_id', course_id);
+
+    const { data: obs, error: obsErr } = await obsQ;
+    if (obsErr) return NextResponse.json({ error: obsErr.message }, { status: 400 });
+    if (!obs || obs.length === 0) return NextResponse.json({ items: [] });
+
+    // join thêm thông tin SV + rubric + course code/name
+    const studentIds = Array.from(new Set(obs.map(o => o.student_id).filter(Boolean)));
+    const rubricIds  = Array.from(new Set(obs.map(o => o.rubric_id).filter(Boolean)));
+    const courseIds  = Array.from(new Set(obs.map(o => o.course_id).filter(Boolean)));
+
+    const [{ data: students, error: stuErr },
+           { data: rubrics,  error: rubErr },
+           { data: courses,  error: crsErr }] = await Promise.all([
+      supabase.from('students').select('user_id, mssv, full_name').in('user_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000']),
+      supabase.from('rubrics').select('id, title'),
+      supabase.from('courses').select('id, course_code'),
+    ]);
+    if (stuErr) return NextResponse.json({ error: stuErr.message }, { status: 400 });
+    if (rubErr) return NextResponse.json({ error: rubErr.message }, { status: 400 });
+    if (crsErr) return NextResponse.json({ error: crsErr.message }, { status: 400 });
+
+    const stuMap = new Map((students || []).map(s => [s.user_id, s]));
+    const rubMap = new Map((rubrics  || []).map(r => [r.id, r]));
+    const crsMap = new Map((courses  || []).map(c => [c.id, c]));
+
+    let items = (obs || []).map(o => {
+      const st = stuMap.get(o.student_id);
+      const rb = rubMap.get(o.rubric_id);
+      const cs = crsMap.get(o.course_id);
+      return {
+        id: o.id as string,
+        created_at: o.observed_at ?? null,      // UI dùng created_at: map từ observed_at
+        submitted_at: null,                      // bảng hiện tại không có; để null
+        status: (o.kind === 'submitted' ? 'submitted' : 'draft') as 'draft'|'submitted',
+        course_code: cs?.course_code ?? null,
+        framework_id: framework_id ?? null,
+        student_user_id: o.student_id as string,
+        student_mssv: st?.mssv ?? null,
+        student_full_name: st?.full_name ?? null,
+        rubric_id: o.rubric_id as string,
+        rubric_title: rb?.title ?? null,
+      };
+    });
+
     if (q) {
       const qq = q.toLowerCase();
       items = items.filter(x =>
@@ -77,45 +111,58 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const supabase = getSupabaseFromRequest(req);
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-    if (authErr) return NextResponse.json({ error: authErr.message }, { status: 401 });
-    if (!user)   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = (await req.json().catch(() => ({}))) as {
-      id?: string;
+      id?: string; // nếu update
       rubric_id?: string;
-      student_user_id?: string;
-      framework_id?: string | null;
-      course_code?: string | null;
-      status?: 'draft' | 'submitted';
-      overall_comment?: string | null;
+      student_user_id?: string;              // từ UI cũ -> map sang student_id
+      framework_id?: string | null;          // chỉ dùng để resolve course_id
+      course_code?: string | null;           // chỉ dùng để resolve course_id
+      status?: 'draft' | 'submitted';        // map sang "kind"
+      overall_comment?: string | null;       // map sang "note"
       items?: Item[];
     };
 
-    const id              = body.id || undefined;
-    const rubric_id       = String(body.rubric_id ?? '');
-    const student_user_id = String(body.student_user_id ?? '');
-    const framework_id    = body.framework_id ?? null;
-    const course_code     = body.course_code ?? null;
-    const status          = (body.status ?? 'draft') as 'draft' | 'submitted';
-    const overall_comment = body.overall_comment ?? null;
-    const items           = Array.isArray(body.items) ? (body.items as Item[]) : [];
+    const id = body.id || undefined;
+    const rubric_id = String(body.rubric_id || '');
+    const student_id = String(body.student_user_id || '');
+    const kind = (body.status === 'submitted' ? 'submitted' : 'draft') as 'submitted'|'draft';
+    const note = body.overall_comment ?? null;
 
-    if (!rubric_id || !student_user_id || !Array.isArray(items)) {
-      return NextResponse.json({ error: 'rubric_id, student_user_id, items are required' }, { status: 400 });
+    if (!rubric_id || !student_id) {
+      return NextResponse.json({ error: 'rubric_id, student_user_id là bắt buộc' }, { status: 400 });
     }
 
-    // UPDATE if id present
-    if (id) {
-      const { data: obs0, error: chkErr } = await supabase.from('observations').select('id,teacher_user_id').eq('id', id).maybeSingle();
-      if (chkErr) return NextResponse.json({ error: chkErr.message }, { status: 400 });
-      if (!obs0 || obs0.teacher_user_id !== user.id) return NextResponse.json({ error: 'Không có quyền cập nhật' }, { status: 403 });
+    // resolve course_id nếu có filter khung + mã học phần
+    let course_id: string | null = null;
+    if (body.framework_id && body.course_code) {
+      course_id = await resolveCourseId(supabase, body.framework_id, body.course_code);
+      if (!course_id) return NextResponse.json({ error: 'Không tìm thấy học phần' }, { status: 400 });
+    }
 
-      const { data: obsUpd, error: updErr } = await supabase
+    // UPDATE (nếu có id)
+    if (id) {
+      // đảm bảo thuộc về rater hiện tại (RLS cũng đã lọc nhưng kiểm tra rõ ràng)
+      const { data: own, error: chkErr } = await supabase
+        .from('observations')
+        .select('id')
+        .eq('id', id)
+        .maybeSingle();
+      if (chkErr) return NextResponse.json({ error: chkErr.message }, { status: 400 });
+      if (!own)   return NextResponse.json({ error: 'Không có quyền cập nhật' }, { status: 403 });
+
+      const { data: upd, error: updErr } = await supabase
         .from('observations')
         .update({
-          rubric_id, student_user_id, framework_id, course_code, status, overall_comment,
-          submitted_at: status === 'submitted' ? new Date().toISOString() : null,
+          rubric_id,
+          student_id,
+          course_id: course_id ?? null,
+          rater_id: user.id,
+          kind,
+          note,
+          observed_at: new Date().toISOString(),
         })
         .eq('id', id)
         .select('*')
@@ -123,48 +170,67 @@ export async function POST(req: Request) {
 
       if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 });
 
-      await supabase.from('observation_item_scores').delete().eq('observation_id', id);
-      if (items.length) {
-        const payload = items.map(it => ({ observation_id: obsUpd.id, item_key: it.item_key, selected_level: it.selected_level, score: it.score ?? null, comment: it.comment ?? null }));
-        const { error: serr } = await supabase.from('observation_item_scores').insert(payload);
-        if (serr) return NextResponse.json({ error: serr.message }, { status: 400 });
+      // Xử lý item scores (nếu bạn đang dùng bảng này)
+      if (Array.isArray(body.items)) {
+        await supabase.from('observation_item_scores').delete().eq('observation_id', id);
+        if (body.items.length) {
+          const payload = body.items.map(it => ({
+            observation_id: id,
+            item_key: it.item_key,
+            selected_level: it.selected_level,
+            score: it.score ?? null,
+            comment: it.comment ?? null,
+          }));
+          const { error: insErr } = await supabase.from('observation_item_scores').insert(payload);
+          if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
+        }
       }
 
-      if (status === 'submitted') {
+      if (kind === 'submitted') {
         const admin = createServiceClient();
-        const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: obsUpd.id });
-        if (rerr) return NextResponse.json({ error: `compute_observation_clo_results: ${rerr.message}` }, { status: 400 });
+        const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: id });
+        if (rerr) return NextResponse.json({ error: `RPC compute_observation_clo_results: ${rerr.message}` }, { status: 400 });
       }
 
-      return NextResponse.json({ observation: obsUpd });
+      return NextResponse.json({ observation: upd });
     }
 
-    // INSERT
-    const { data: obs, error: oerr } = await supabase
+    // INSERT mới
+    const { data: ins, error: insErr } = await supabase
       .from('observations')
       .insert({
-        rubric_id, student_user_id, teacher_user_id: user.id,
-        framework_id, course_code, status, overall_comment,
-        submitted_at: status === 'submitted' ? new Date().toISOString() : null,
+        rubric_id,
+        student_id,
+        course_id: course_id ?? null,
+        rater_id: user.id,
+        kind,
+        note,
+        observed_at: new Date().toISOString(),
       })
       .select('*')
       .single();
 
-    if (oerr) return NextResponse.json({ error: oerr.message }, { status: 400 });
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 
-    if (items.length) {
-      const payload = items.map(it => ({ observation_id: obs.id, item_key: it.item_key, selected_level: it.selected_level, score: it.score ?? null, comment: it.comment ?? null }));
-      const { error: serr } = await supabase.from('observation_item_scores').insert(payload);
-      if (serr) return NextResponse.json({ error: serr.message }, { status: 400 });
+    if (Array.isArray(body.items) && body.items.length) {
+      const payload = body.items.map(it => ({
+        observation_id: ins.id,
+        item_key: it.item_key,
+        selected_level: it.selected_level,
+        score: it.score ?? null,
+        comment: it.comment ?? null,
+      }));
+      const { error: sErr } = await supabase.from('observation_item_scores').insert(payload);
+      if (sErr) return NextResponse.json({ error: sErr.message }, { status: 400 });
     }
 
-    if (status === 'submitted') {
+    if (kind === 'submitted') {
       const admin = createServiceClient();
-      const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: obs.id });
-      if (rerr) return NextResponse.json({ error: `compute_observation_clo_results: ${rerr.message}` }, { status: 400 });
+      const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: ins.id });
+      if (rerr) return NextResponse.json({ error: `RPC compute_observation_clo_results: ${rerr.message}` }, { status: 400 });
     }
 
-    return NextResponse.json({ observation: obs });
+    return NextResponse.json({ observation: ins });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
   }
@@ -176,17 +242,15 @@ export async function DELETE(req: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const id = new URL(req.url).searchParams.get('id') || '';
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
 
-    // chỉ cho xoá bản của chính GV
-    const { data: obs, error: oerr } = await supabase.from('observations').select('id').eq('id', id).eq('teacher_user_id', user.id).maybeSingle();
-    if (oerr) return NextResponse.json({ error: oerr.message }, { status: 400 });
-    if (!obs) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
+    // xoá con trước (nếu FK chưa cascade)
     await supabase.from('observation_item_scores').delete().eq('observation_id', id);
-    const { error: derr } = await supabase.from('observations').delete().eq('id', id);
-    if (derr) return NextResponse.json({ error: derr.message }, { status: 400 });
+
+    const { error } = await supabase.from('observations').delete().eq('id', id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
