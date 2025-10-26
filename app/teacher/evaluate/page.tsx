@@ -3,558 +3,413 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 
-/** ========= Types ========= */
-type Framework = { id: string; doi_tuong?: string; chuyen_nganh?: string; nien_khoa?: string };
-type CourseOpt = { course_code: string; course_name?: string | null };
+type FrameworkOpt = { id: string; label: string };
+type CourseOpt    = { course_code: string; course_name?: string | null };
 
-type Student = { mssv: string; user_id: string; full_name?: string; cohort?: string; class_name?: string };
-
-type RubricColumn = { key: string; label: string; score?: number };
-type RubricItem = { id: string; label: string; clo_ids?: string[] };
 type Rubric = {
-  id: string; // UUID !!!
-  name: string;
-  definition: { columns: RubricColumn[]; rows: RubricItem[] };
+  id: string;
+  name: string;                 // mapped from rubrics.title ở API
+  definition: {
+    columns: Array<{ key: string; label: string }>;
+    rows: Array<{ id: string; label: string; clo_ids?: string[] }>;
+  };
   framework_id?: string | null;
   course_code?: string | null;
+  threshold?: number | null;
 };
+type RubricItem   = Rubric['definition']['rows'][number];
+type RubricColumn = Rubric['definition']['columns'][number];
 
-type GradeState = Record<string, { selected_level: string; score?: number; comment?: string }>;
+type Student = { user_id: string; mssv: string; full_name?: string | null; framework_id?: string | null };
 
-type ObservationListItem = {
+type HistoryRow = {
   id: string;
   created_at: string;
-  status?: 'draft' | 'submitted';
-  student_mssv: string;
-  student_full_name?: string | null;
-  rubric_title: string;
-  course_code?: string | null;
-};
-
-type ObservationDetail = {
-  id: string;
-  rubric_id: string; // UUID !!!
-  rubric_title?: string;
+  submitted_at?: string | null;
+  status: 'draft'|'submitted';
   course_code?: string | null;
   framework_id?: string | null;
   student_user_id: string;
-  student_mssv?: string;
-  student_full_name?: string;
-  status: 'draft' | 'submitted';
-  overall_comment?: string | null;
-  items: Array<{ item_key: string; selected_level: string; score?: number | null; comment?: string | null }>;
+  student_mssv?: string | null;
+  student_full_name?: string | null;
+  rubric_id: string;
+  rubric_title?: string | null;
 };
 
-/** ========= Helpers ========= */
-const fwLabel = (f?: Framework) =>
-  f ? [f.doi_tuong, f.chuyen_nganh, f.nien_khoa].filter(Boolean).join(' • ') || f.id : '';
-
-/** ========= Component ========= */
 export default function TeacherEvaluatePage() {
-  /** ------- Dropdown: Framework & Course ------- */
-  const [frameworks, setFrameworks] = useState<Framework[]>([]);
-  const [frameworkId, setFrameworkId] = useState<string>('');
-
+  /** Filters (step 1): framework → course → rubric */
+  const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
+  const [frameworkId, setFrameworkId] = useState('');
   const [courses, setCourses] = useState<CourseOpt[]>([]);
-  const [courseCode, setCourseCode] = useState<string>('');
-
-  /** ------- Rubrics ------- */
+  const [courseCode, setCourseCode] = useState('');
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
-  const [rubricId, setRubricId] = useState<string>(''); // UUID
+  const [rubricId, setRubricId] = useState<string | null>(null);
   const [rubric, setRubric] = useState<Rubric | null>(null);
-  const [loadingList, setLoadingList] = useState(false);
-  const [loadingRubric, setLoadingRubric] = useState(false);
 
-  /** ------- Student pick (dropdown + search) ------- */
-  const [studentList, setStudentList] = useState<Student[]>([]);
-  const [studentOpt, setStudentOpt] = useState<string>(''); // selected user_id
+  /** Student picking (step 2) */
+  const [students, setStudents] = useState<Student[]>([]);
+  const [studentFilter, setStudentFilter] = useState('');
+  const [mssvQuick, setMssvQuick] = useState('');
   const [student, setStudent] = useState<Student | null>(null);
 
-  const [studentQ, setStudentQ] = useState(''); // tìm nhanh MSSV/họ tên
-  const [searchingStu, setSearchingStu] = useState(false);
-
-  /** ------- Grading state ------- */
-  const [items, setItems] = useState<GradeState>({});
+  /** Rubric grading (step 3) */
+  const [grading, setGrading] = useState<Record<string, { selected_level?: string; comment?: string }>>({});
   const [overallComment, setOverallComment] = useState('');
-  const [editingObservationId, setEditingObservationId] = useState<string | null>(null); // nếu đang sửa
+  const [editingObservationId, setEditingObservationId] = useState<string | null>(null); // nếu sửa nháp
 
-  /** ------- History table ------- */
-  const [hist, setHist] = useState<ObservationListItem[]>([]);
-  const [histQ, setHistQ] = useState(''); // tìm riêng bảng “Đã chấm”
-  const [loadingHist, setLoadingHist] = useState(false);
+  /** History (bottom) */
+  const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [histQ, setHistQ] = useState('');
+  const [loadingRubric, setLoadingRubric] = useState(false);
 
-  /** ========= Load frameworks ========= */
+  /* ---------- Load master dropdowns ---------- */
   useEffect(() => {
     (async () => {
-      try {
-        const res = await fetch('/api/academic-affairs/frameworks', { cache: 'no-store' });
-        const js = await res.json();
-        setFrameworks(res.ok ? (js.data || []) : []);
-      } catch {
-        setFrameworks([]);
-      }
+      const r = await fetch('/api/common/frameworks', { cache: 'no-store' });
+      const d = await r.json();
+      setFrameworks(d.items || []);
     })();
   }, []);
 
-  /** ========= When framework changes: load courses, reset downstream ========= */
   useEffect(() => {
+    setCourseCode(''); setRubricId(null); setRubric(null);
+    setStudents([]); setStudent(null);
+    setHistory([]);
+    if (!frameworkId) { setCourses([]); return; }
     (async () => {
-      setCourses([]);
-      setCourseCode('');
-      setRubrics([]);
-      setRubricId('');
-      setRubric(null);
-      setItems({});
-      setStudent(null);
-      setStudentList([]);
-      setStudentOpt('');
-      if (!frameworkId) return;
       const p = new URLSearchParams({ framework_id: frameworkId });
-      const res = await fetch(`/api/department/courses?${p.toString()}`, { cache: 'no-store' });
-      const js = await res.json();
-      setCourses(res.ok ? (js.data || []) : []);
+      const r = await fetch(`/api/common/courses?${p.toString()}`, { cache: 'no-store' });
+      const d = await r.json();
+      setCourses(d.items || []);
+    })();
+    // load students of framework for dropdown
+    (async () => {
+      const p = new URLSearchParams({ framework_id: frameworkId });
+      const r = await fetch(`/api/common/students?${p.toString()}`, { cache: 'no-store' });
+      const d = await r.json();
+      setStudents(d.items || []); // API trả { user_id, mssv, full_name }
     })();
   }, [frameworkId]);
 
-  /** ========= When framework/course changes: load rubrics list ========= */
   useEffect(() => {
-    (async () => {
-      setLoadingList(true);
-      try {
-        const p = new URLSearchParams();
-        if (frameworkId) p.set('framework_id', frameworkId);
-        if (courseCode) p.set('course_code', courseCode);
-        const r = await fetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' });
-        const d = await r.json();
-        setRubrics(r.ok ? (d.items || []) : []);
-      } finally {
-        setLoadingList(false);
-      }
-    })();
+    setRubricId(null); setRubric(null);
+    if (!frameworkId || !courseCode) { setRubrics([]); return; }
+    const p = new URLSearchParams({ framework_id: frameworkId, course_code: courseCode });
+    fetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setRubrics(d.items || []));
   }, [frameworkId, courseCode]);
 
-  /** ========= Pick rubric: load detail, reset student + grading ========= */
   useEffect(() => {
-    (async () => {
-      setRubric(null);
-      setItems({});
-      setOverallComment('');
-      setStudent(null);
-      setStudentList([]);
-      setStudentOpt('');
-      setEditingObservationId(null);
-      if (!rubricId) return;
-      setLoadingRubric(true);
-      try {
-        const r = await fetch(`/api/teacher/rubrics/${encodeURIComponent(rubricId)}`, { cache: 'no-store' });
-        const d = await r.json();
-        if (r.ok) setRubric(d.item || null);
-      } finally {
-        setLoadingRubric(false);
-      }
-    })();
+    setRubric(null); setStudent(null); setGrading({}); setEditingObservationId(null);
+    if (!rubricId) return;
+    setLoadingRubric(true);
+    fetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setRubric(d.item || null))
+      .finally(() => setLoadingRubric(false));
   }, [rubricId]);
 
-  /** ========= Load initial student dropdown (by framework) once rubric is chosen ========= */
-  useEffect(() => {
-    (async () => {
-      if (!rubricId || !frameworkId) return;
-      try {
-        const p = new URLSearchParams({ framework_id: frameworkId, limit: '100' });
-        const r = await fetch(`/api/teacher/students?${p.toString()}`, { cache: 'no-store' });
-        const d = await r.json();
-        setStudentList(r.ok ? (d.items || []) : []);
-      } catch {
-        setStudentList([]);
-      }
-    })();
-  }, [rubricId, frameworkId]);
-
-  /** ========= History: list teacher's observations ========= */
+  /* ---------- History ---------- */
   async function loadHistory() {
-    setLoadingHist(true);
-    try {
-      const p = new URLSearchParams();
-      if (frameworkId) p.set('framework_id', frameworkId);
-      if (courseCode) p.set('course_code', courseCode);
-      if (histQ.trim()) p.set('q', histQ.trim());
-      const r = await fetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
-      const d = await r.json();
-      setHist(r.ok ? (d.items || []) : []);
-    } finally {
-      setLoadingHist(false);
-    }
+    if (!frameworkId) { setHistory([]); return; }
+    const p = new URLSearchParams();
+    p.set('framework_id', frameworkId);
+    if (courseCode) p.set('course_code', courseCode);
+    if (histQ.trim()) p.set('q', histQ.trim());
+    const r = await fetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
+    const d = await r.json();
+    if (r.ok) setHistory(d.items || []);
+    else setHistory([]);
   }
   useEffect(() => { loadHistory(); /* eslint-disable-next-line */ }, [frameworkId, courseCode]);
 
-  /** ========= Student quick search ========= */
-  async function searchStudents() {
-    if (!rubricId || !frameworkId) return;
-    const q = studentQ.trim();
-    setSearchingStu(true);
-    try {
-      const p = new URLSearchParams({ framework_id: frameworkId, limit: '100' });
-      if (q) p.set('q', q);
-      const r = await fetch(`/api/teacher/students?${p.toString()}`, { cache: 'no-store' });
-      const d = await r.json();
-      setStudentList(r.ok ? (d.items || []) : []);
-    } finally {
-      setSearchingStu(false);
-    }
+  /* ---------- Student helpers ---------- */
+  const filteredStudents = useMemo(() => {
+    const q = studentFilter.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter(s =>
+      (s.mssv || '').toLowerCase().includes(q) ||
+      (s.full_name || '').toLowerCase().includes(q)
+    );
+  }, [students, studentFilter]);
+
+  async function quickFindMssv() {
+    if (!mssvQuick.trim()) return;
+    const r = await fetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
+    const d = await r.json();
+    if (!r.ok) return alert(d.error || 'Không tìm thấy MSSV');
+    setStudent(d.student);
   }
 
-  /** ========= When student selected from dropdown ========= */
-  useEffect(() => {
-    if (!studentOpt) { setStudent(null); return; }
-    const s = studentList.find(s => s.user_id === studentOpt) || null;
-    setStudent(s);
-  }, [studentOpt, studentList]);
-
-  /** ========= Grading actions ========= */
-  const rows: RubricItem[] = useMemo(() => rubric?.definition?.rows || [], [rubric]);
+  /* ---------- Grade form helpers ---------- */
+  const rows: RubricItem[]   = useMemo(() => rubric?.definition?.rows || [], [rubric]);
   const cols: RubricColumn[] = useMemo(() => rubric?.definition?.columns || [], [rubric]);
 
-  function setSelection(rowId: string, level: string) {
-    setItems(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), selected_level: level } }));
+  function pickLevel(rowId: string, key: string) {
+    setGrading(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), selected_level: key } }));
   }
-  function setItemComment(rowId: string, comment: string) {
-    setItems(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), comment } }));
+  function setRowComment(rowId: string, txt: string) {
+    setGrading(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), comment: txt } }));
   }
 
-  async function submitObservation(status: 'draft' | 'submitted') {
-    if (!rubric || !student) { alert('Chưa chọn Rubric / Sinh viên'); return; }
+  async function submitObservation(status: 'draft'|'submitted') {
+    if (!rubric || !student) return alert('Hãy chọn rubric và sinh viên.');
     const payload = {
-      id: editingObservationId || undefined,     // nếu sửa thì gửi kèm id
-      rubric_id: rubric.id,                      // UUID !!!
+      id: editingObservationId || undefined,
+      rubric_id: rubric.id,
       student_user_id: student.user_id,
       framework_id: frameworkId || null,
       course_code: courseCode || null,
       status,
       overall_comment: overallComment || null,
-      items: Object.entries(items).map(([item_key, v]) => ({
+      items: Object.entries(grading).map(([item_key, v]) => ({
         item_key,
-        selected_level: v.selected_level,
-        score: v.score ?? null,
-        comment: v.comment ?? null,
+        selected_level: v.selected_level || '',
+        comment: v.comment || null,
       })),
     };
-    const method = editingObservationId ? 'PATCH' : 'POST';
     const r = await fetch('/api/teacher/observations', {
-      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
     const d = await r.json();
-    if (!r.ok) { alert(d.error || 'Lỗi lưu đánh giá'); return; }
-    alert(status === 'submitted' ? 'Đã gửi đánh giá & cập nhật kết quả SV' : (editingObservationId ? 'Đã cập nhật nháp' : 'Đã lưu nháp'));
+    if (!r.ok) return alert(d.error || 'Lỗi lưu đánh giá');
+    alert(status === 'submitted' ? 'Đã gửi đánh giá' : 'Đã lưu nháp');
+
+    // reset nhẹ
     setEditingObservationId(null);
+    setGrading({});
+    setOverallComment('');
     await loadHistory();
-    // giữ nguyên rubric, reset chọn SV & form
-    setStudentOpt(''); setStudent(null); setStudentQ(''); setItems({}); setOverallComment('');
   }
 
-  /** ========= Edit/Delete from history ========= */
-  async function editObservation(id: string) {
-    const r = await fetch(`/api/teacher/observations/${encodeURIComponent(id)}`, { cache: 'no-store' });
-    const d = await r.json();
-    if (!r.ok || !d.item) { alert(d.error || 'Không tải được bản chấm'); return; }
-    const obs: ObservationDetail = d.item;
-
-    // nếu rubric khác -> chọn lại rubric
-    if (!rubric || rubric.id !== obs.rubric_id) setRubricId(obs.rubric_id);
-
-    // set SV
-    setStudent({
-      user_id: obs.student_user_id,
-      mssv: obs.student_mssv || '',
-      full_name: obs.student_full_name || undefined,
-    });
-    setStudentOpt(obs.student_user_id);
-
-    // map items
-    const next: GradeState = {};
-    (obs.items || []).forEach(it => {
-      next[it.item_key] = {
-        selected_level: it.selected_level,
-        score: it.score ?? undefined,
-        comment: it.comment ?? undefined,
-      };
-    });
-    setItems(next);
-    setOverallComment(obs.overall_comment || '');
-    setEditingObservationId(obs.id);
+  function startEdit(h: HistoryRow) {
+    // mở lại form theo rubric & SV (chưa load lại từng item vì route detail chưa có)
+    setRubricId(h.rubric_id);
+    setStudent({ user_id: h.student_user_id, mssv: h.student_mssv || '', full_name: h.student_full_name || '' });
+    setEditingObservationId(h.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async function deleteObservation(id: string) {
+  async function deleteObs(id: string) {
     if (!confirm('Xoá bản chấm này?')) return;
     const r = await fetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const d = await r.json();
-    if (!r.ok) { alert(d.error || 'Xoá lỗi'); return; }
+    const d = await r.json().catch(()=> ({}));
+    if (!r.ok) return alert(d.error || 'Xoá thất bại (cần bổ sung DELETE API).');
     await loadHistory();
   }
 
-  /** ========= Render ========= */
+  /* ====================== UI ====================== */
   return (
-    <section className="space-y-6">
-      {/* ===== Filters: Framework & Course & Rubric (dropdowns) ===== */}
+    <section className="space-y-4">
+      {/* Filter bar */}
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-4">
-          {/* Framework dropdown */}
+        <div className="grid md:grid-cols-4 gap-3">
           <select
-            className="rounded-xl border border-slate-300 px-3 py-2"
+            className="rounded-xl border border-slate-300 px-3 py-2 text-slate-900"
             value={frameworkId}
             onChange={(e) => setFrameworkId(e.target.value)}
           >
             <option value="">-- Chọn khung --</option>
-            {frameworks.map(f => (
-              <option key={f.id} value={f.id}>{fwLabel(f) || f.id}</option>
-            ))}
+            {frameworks.map(f => <option key={f.id} value={f.id} className="text-slate-900">{f.label}</option>)}
           </select>
 
-          {/* Course dropdown (depends on framework) */}
           <select
-            className="rounded-xl border border-slate-300 px-3 py-2"
+            className="rounded-xl border border-slate-300 px-3 py-2 text-slate-900"
             value={courseCode}
             onChange={(e) => setCourseCode(e.target.value)}
             disabled={!frameworkId}
           >
             <option value="">-- Chọn học phần --</option>
             {courses.map(c => (
-              <option key={c.course_code} value={c.course_code}>
-                {c.course_code}{c.course_name ? ` • ${c.course_name}` : ''}
+              <option key={c.course_code} value={c.course_code} className="text-slate-900">
+                {c.course_code} — {c.course_name || c.course_code}
               </option>
             ))}
           </select>
 
-          {/* Rubric dropdown (depends on framework + course) */}
           <select
-            className="rounded-xl border border-slate-300 px-3 py-2"
-            value={rubricId}
-            onChange={(e) => setRubricId(e.target.value)}
-            disabled={!frameworkId || !courseCode}
+            className="rounded-xl border border-slate-300 px-3 py-2 text-slate-900"
+            value={rubricId ?? ''}
+            onChange={(e) => setRubricId(e.target.value ? String(e.target.value) : null)}
+            disabled={!courseCode}
           >
             <option value="">-- Chọn rubric --</option>
-            {rubrics.map(r => (
-              <option key={r.id} value={r.id}>
-                {r.name}{r.course_code ? ` • ${r.course_code}` : ''}
-              </option>
-            ))}
+            {rubrics.map(r => <option key={r.id} value={r.id} className="text-slate-900">{r.name}</option>)}
           </select>
 
-          {/* Info */}
-          <div className="flex items-center text-sm text-slate-500">
-            {loadingList
-              ? 'Đang tải rubrics…'
-              : (rubrics.length ? `${rubrics.length} rubric` : 'Chọn khung & học phần')}
+          <div className="flex items-center">
+            <span className="text-sm text-slate-600">Chọn khung & học phần</span>
           </div>
         </div>
       </div>
 
-      {/* ===== Student picker: dropdown + quick search (only when rubric chosen) ===== */}
+      {/* Student picker */}
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 text-sm font-semibold">Chọn sinh viên để chấm</div>
-        {!rubricId && (
-          <div className="text-sm text-slate-500">Chọn khung, học phần và rubric trước khi chọn sinh viên.</div>
-        )}
-        {rubricId && (
+        <div className="text-sm font-semibold mb-2">Chọn sinh viên để chấm</div>
+        {!rubric && <div className="text-sm text-slate-500">Chọn khung, học phần và rubric trước khi chọn sinh viên.</div>}
+
+        <div className="grid md:grid-cols-3 gap-3 mt-1">
+          <div className="md:col-span-2 flex gap-2">
+            <input
+              placeholder="Tìm nhanh MSSV / họ tên"
+              className="rounded-xl border border-slate-300 px-3 py-2 flex-1"
+              value={studentFilter}
+              onChange={(e)=>setStudentFilter(e.target.value)}
+              disabled={!rubric}
+            />
+            <select
+              className="rounded-xl border border-slate-300 px-3 py-2 text-slate-900 w-72"
+              value={student?.user_id ?? ''}
+              onChange={(e) => {
+                const sv = students.find(s => s.user_id === e.target.value) || null;
+                setStudent(sv);
+              }}
+              disabled={!rubric}
+            >
+              <option value="">-- Chọn sinh viên --</option>
+              {filteredStudents.map(s => (
+                <option key={s.user_id} value={s.user_id} className="text-slate-900">
+                  {s.mssv} — {s.full_name || 'SV'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <input
+              className="rounded-xl border border-slate-300 px-3 py-2 flex-1"
+              placeholder="Nhập MSSV để tìm nhanh"
+              value={mssvQuick}
+              onChange={(e)=>setMssvQuick(e.target.value)}
+              disabled={!rubric}
+            />
+            <button
+              onClick={quickFindMssv}
+              disabled={!rubric || !mssvQuick.trim()}
+              className="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Tìm nhanh MSSV
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Grading form */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        {!rubric && <div className="text-sm text-slate-500">Chọn rubric để bắt đầu chấm.</div>}
+        {rubric && (
           <>
-            <div className="grid gap-3 md:grid-cols-3">
-              {/* Dropdown SV (theo framework) */}
-              <select
-                className="rounded-xl border border-slate-300 px-3 py-2"
-                value={studentOpt}
-                onChange={(e) => setStudentOpt(e.target.value)}
-              >
-                <option value="">-- Chọn sinh viên (theo khung) --</option>
-                {studentList.map(s => (
-                  <option key={s.user_id} value={s.user_id}>
-                    {s.mssv} • {s.full_name || '—'}
-                  </option>
-                ))}
-              </select>
-
-              {/* Ô tìm nhanh */}
-              <div className="flex gap-2">
-                <input
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2"
-                  placeholder="Tìm MSSV / họ tên"
-                  value={studentQ}
-                  onChange={(e) => setStudentQ(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') searchStudents(); }}
-                />
-                <button
-                  className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                  onClick={searchStudents}
-                  disabled={searchingStu}
-                >
-                  {searchingStu ? 'Đang tìm…' : 'Tìm'}
-                </button>
-              </div>
-
-              {/* Thông tin SV đã chọn */}
-              <div className="text-sm text-slate-600">
-                {student
-                  ? <span>Đang chọn: <b>{student.full_name || 'Sinh viên'}</b> • {student.mssv}</span>
-                  : <span>Chưa chọn sinh viên</span>}
-              </div>
+            <div className="mb-2 text-sm text-slate-600">
+              Rubric: <b>{rubric.name}</b> {student ? <>• SV: <b>{student.full_name}</b> ({student.mssv})</> : null}
             </div>
 
-            {/* Card SV chi tiết */}
-            {student && (
-              <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm">
-                <div><b>{student.full_name || 'Sinh viên'}</b> • MSSV: {student.mssv}</div>
-                <div className="text-slate-500">Lớp: {student.class_name || '—'} • Khoá: {student.cohort || '—'}</div>
+            {loadingRubric ? (
+              <div className="h-24 rounded-xl bg-slate-100 animate-pulse" />
+            ) : (
+              <div className="space-y-4">
+                {rows.map(row => (
+                  <div key={row.id} className="border border-slate-200 rounded-xl p-3">
+                    <div className="font-medium">{row.label}</div>
+                    <div className="mt-2 flex flex-wrap gap-3">
+                      {cols.map(c => (
+                        <label key={c.key} className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name={`row_${row.id}`}
+                            checked={grading[row.id]?.selected_level === c.key}
+                            onChange={() => pickLevel(row.id, c.key)}
+                          />
+                          <span>{c.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <textarea
+                      placeholder="Nhận xét cho tiêu chí này (tuỳ chọn)"
+                      className="mt-2 w-full rounded-xl border border-slate-300 p-2 text-sm"
+                      value={grading[row.id]?.comment || ''}
+                      onChange={(e)=>setRowComment(row.id, e.target.value)}
+                    />
+                    {row.clo_ids?.length ? (
+                      <div className="mt-1 text-xs text-slate-500">Liên quan CLO: {row.clo_ids.join(', ')}</div>
+                    ) : null}
+                  </div>
+                ))}
+                <div>
+                  <textarea
+                    placeholder="Nhận xét tổng quan"
+                    className="w-full rounded-xl border border-slate-300 p-2"
+                    value={overallComment}
+                    onChange={(e)=>setOverallComment(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={()=>submitObservation('draft')}
+                    className="px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50"
+                    disabled={!student}
+                  >
+                    Lưu nháp
+                  </button>
+                  <button
+                    onClick={()=>submitObservation('submitted')}
+                    className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-95 active:scale-[0.99]"
+                    disabled={!student}
+                  >
+                    Gửi đánh giá
+                  </button>
+                </div>
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* ===== Rubric grading ===== */}
-      <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        {loadingRubric && (
-          <div className="space-y-3">
-            <div className="h-4 w-48 animate-pulse rounded bg-slate-200" />
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="animate-pulse rounded-xl border border-slate-200 p-3">
-                <div className="h-4 w-40 rounded bg-slate-200" />
-                <div className="mt-2 h-4 w-64 rounded bg-slate-200" />
-                <div className="mt-2 h-24 w-full rounded bg-slate-200" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!loadingRubric && !rubric && (
-          <div className="text-sm text-slate-500">Chọn rubric để bắt đầu chấm.</div>
-        )}
-
-        {!loadingRubric && rubric && (
-          <>
-            <div className="text-sm text-slate-500">
-              Rubric: <b>{rubric.name}</b> {rubric.course_code ? `• ${rubric.course_code}` : ''}
-              {editingObservationId ? <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-amber-800">Đang sửa</span> : null}
-            </div>
-
-            {/* rows */}
-            <div className="space-y-4">
-              {rows.map((row) => (
-                <div key={row.id} className="rounded-xl border border-slate-200 p-3">
-                  <div className="font-medium">{row.label}</div>
-                  <div className="mt-2 flex flex-wrap gap-3">
-                    {cols.map((c) => (
-                      <label key={c.key} className="inline-flex items-center gap-2 text-sm">
-                        <input
-                          type="radio"
-                          name={`row_${row.id}`}
-                          checked={items[row.id]?.selected_level === c.key}
-                          onChange={() => setSelection(row.id, c.key)}
-                          disabled={!student}
-                        />
-                        <span>{c.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <textarea
-                    placeholder="Nhận xét ngắn cho tiêu chí này"
-                    className="mt-2 w-full rounded-xl border border-slate-300 p-2 text-sm"
-                    value={items[row.id]?.comment || ''}
-                    onChange={(e) => setItemComment(row.id, e.target.value)}
-                    disabled={!student}
-                  />
-                  {row.clo_ids?.length ? (
-                    <div className="mt-2 text-xs text-slate-500">Liên quan CLO: {row.clo_ids.join(', ')}</div>
-                  ) : null}
-                </div>
-              ))}
-              {rows.length === 0 && <div className="text-sm text-slate-500">Rubric chưa có tiêu chí.</div>}
-            </div>
-
-            <div>
-              <textarea
-                placeholder="Nhận xét tổng quan"
-                className="w-full rounded-xl border border-slate-300 p-2"
-                value={overallComment}
-                onChange={(e) => setOverallComment(e.target.value)}
-                disabled={!student}
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className="rounded-xl border border-slate-200 px-4 py-2 hover:bg-slate-50"
-                onClick={() => submitObservation('draft')}
-                disabled={!student}
-                title={!student ? 'Chọn sinh viên trước' : ''}
-              >
-                {editingObservationId ? 'Cập nhật nháp' : 'Lưu nháp'}
-              </button>
-              <button
-                className="rounded-xl bg-slate-900 px-4 py-2 text-white hover:opacity-95 active:scale-[0.99]"
-                onClick={() => submitObservation('submitted')}
-                disabled={!student}
-                title={!student ? 'Chọn sinh viên trước' : ''}
-              >
-                {editingObservationId ? 'Cập nhật & Gửi' : 'Gửi đánh giá'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ===== History / Past observations ===== */}
-      <div className="space-y-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="text-base font-semibold">Đã chấm</div>
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+      {/* History table */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-lg font-semibold">Đã chấm</div>
+          <div className="flex gap-2">
             <input
+              className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="Tìm MSSV / họ tên"
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm md:w-72"
               value={histQ}
-              onChange={(e) => setHistQ(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') loadHistory(); }}
+              onChange={(e)=>setHistQ(e.target.value)}
             />
-            <button onClick={loadHistory} className="rounded-xl border px-3 py-2 hover:bg-gray-50">
-              {loadingHist ? 'Đang lọc…' : 'Lọc'}
-            </button>
+            <button onClick={loadHistory} className="px-3 py-2 rounded-xl border hover:bg-slate-50">Lọc</button>
           </div>
         </div>
 
-        <div className="overflow-auto rounded border">
-          <table className="min-w-full text-sm">
+        <div className="overflow-auto border rounded">
+          <table className="min-w-[900px] w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="border-b px-3 py-2 text-left">Thời gian</th>
-                <th className="border-b px-3 py-2 text-left">MSSV</th>
-                <th className="border-b px-3 py-2 text-left">Họ tên</th>
-                <th className="border-b px-3 py-2 text-left">Học phần</th>
-                <th className="border-b px-3 py-2 text-left">Rubric</th>
-                <th className="border-b px-3 py-2 text-left">Trạng thái</th>
-                <th className="w-40 border-b px-3 py-2 text-left">Thao tác</th>
+                {['Thời gian','MSSV','Họ tên','Học phần','Rubric','Trạng thái','Thao tác'].map(h => (
+                  <th key={h} className="px-3 py-2 text-left border-b">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {hist.map((h) => (
+              {history.map(h => (
                 <tr key={h.id} className="odd:bg-gray-50">
-                  <td className="border-b px-3 py-2">{new Date(h.created_at).toLocaleString()}</td>
-                  <td className="border-b px-3 py-2">{h.student_mssv}</td>
-                  <td className="border-b px-3 py-2">{h.student_full_name || '—'}</td>
-                  <td className="border-b px-3 py-2">{h.course_code || '—'}</td>
-                  <td className="border-b px-3 py-2">{h.rubric_title}</td>
-                  <td className="border-b px-3 py-2">{h.status === 'submitted' ? 'Đã gửi' : 'Nháp'}</td>
-                  <td className="border-b px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <button className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50" onClick={() => editObservation(h.id)}>Sửa</button>
-                      <button className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50" onClick={() => deleteObservation(h.id)}>Xoá</button>
+                  <td className="px-3 py-2 border-b">
+                    {new Date(h.created_at).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 border-b">{h.student_mssv || '—'}</td>
+                  <td className="px-3 py-2 border-b">{h.student_full_name || '—'}</td>
+                  <td className="px-3 py-2 border-b">{h.course_code || '—'}</td>
+                  <td className="px-3 py-2 border-b">{h.rubric_title || '—'}</td>
+                  <td className="px-3 py-2 border-b">{h.status === 'submitted' ? 'Đã gửi' : 'Nháp'}</td>
+                  <td className="px-3 py-2 border-b">
+                    <div className="flex gap-2">
+                      <button className="text-blue-700 hover:underline" onClick={()=>startEdit(h)}>Sửa</button>
+                      <button className="text-red-700 hover:underline" onClick={()=>deleteObs(h.id)}>Xoá</button>
                     </div>
                   </td>
                 </tr>
               ))}
-              {hist.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
-                    {loadingHist ? 'Đang tải…' : 'Chưa có bản chấm nào.'}
-                  </td>
-                </tr>
+              {history.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-500">Chưa có bản chấm nào.</td></tr>
               )}
             </tbody>
           </table>
