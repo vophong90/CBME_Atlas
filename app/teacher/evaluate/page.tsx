@@ -2,10 +2,11 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { authFetch } from '@/lib/authFetch'; // vẫn import được, nhưng có fallback
+import { authFetch } from '@/lib/authFetch';
 
+/** ===== Types ===== */
 type FrameworkOpt = { id: string; label: string };
-type CourseOpt    = { course_code: string; course_name?: string | null };
+type CourseOpt = { course_code: string; course_name?: string | null };
 
 type Rubric = {
   id: string;
@@ -18,7 +19,7 @@ type Rubric = {
   course_code?: string | null;
   threshold?: number | null;
 };
-type RubricItem   = Rubric['definition']['rows'][number];
+type RubricItem = Rubric['definition']['rows'][number];
 type RubricColumn = Rubric['definition']['columns'][number];
 
 type Student = { user_id: string; mssv: string; full_name?: string | null; framework_id?: string | null };
@@ -27,7 +28,7 @@ type HistoryRow = {
   id: string;
   created_at: string;
   submitted_at?: string | null;
-  status: 'draft'|'submitted';
+  status: 'draft' | 'submitted';
   course_code?: string | null;
   framework_id?: string | null;
   student_user_id: string;
@@ -37,17 +38,54 @@ type HistoryRow = {
   rubric_title?: string | null;
 };
 
-// --- helper: thử authFetch, nếu 401 thì dùng fetch thường (dev, chưa đăng nhập)
-async function devFetch(input: RequestInfo | URL, init?: RequestInit) {
-  try {
-    const r = await authFetch(input as any, init);
-    if (r.status !== 401) return r;
-  } catch {}
-  return fetch(input, init);
+/** ===== Chuẩn hoá rubric từ DB (nhận cả 2 format) =====
+ * - columns có thể là string[] hoặc {key,label}[]
+ * - rows có thể là:
+ *     + { id, label, clo_ids? }  (format mới cho GV)
+ *     + { id, criterion, clo_code?, cells: [...] } (format trang tạo rubric BM)
+ */
+function normalizeRubric(raw: any): Rubric | null {
+  if (!raw) return null;
+  const def = raw.definition || {};
+
+  // Columns
+  let cols: Array<{ key: string; label: string }> = [];
+  if (Array.isArray(def.columns)) {
+    cols = def.columns.map((c: any, idx: number) => {
+      if (typeof c === 'string') return { key: String(idx + 1), label: c };
+      const k = (c?.key ?? String(idx + 1)) + '';
+      const l = (c?.label ?? `Mức ${idx + 1}`) + '';
+      return { key: k, label: l };
+    });
+  }
+
+  // Rows
+  let rows: Array<{ id: string; label: string; clo_ids?: string[] }> = [];
+  if (Array.isArray(def.rows)) {
+    rows = def.rows.map((r: any, i: number) => {
+      const id = (r?.id ?? `r${i}`) + '';
+      const lbl = (r?.label ?? r?.criterion ?? `Tiêu chí ${i + 1}`) + '';
+      const clo = Array.isArray(r?.clo_ids)
+        ? r.clo_ids
+        : r?.clo_code
+        ? [String(r.clo_code)]
+        : undefined;
+      return { id, label: lbl, clo_ids: clo };
+    });
+  }
+
+  return {
+    id: raw.id,
+    name: raw.name ?? raw.title ?? 'Rubric',
+    definition: { columns: cols, rows },
+    framework_id: raw.framework_id ?? null,
+    course_code: raw.course_code ?? null,
+    threshold: raw.threshold ?? null,
+  };
 }
 
 export default function TeacherEvaluatePage() {
-  // ====== Bộ lọc: khung → học phần → rubric ======
+  /** ====== Bộ lọc: khung → học phần → rubric ====== */
   const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
   const [frameworkId, setFrameworkId] = useState('');
   const [courses, setCourses] = useState<CourseOpt[]>([]);
@@ -56,23 +94,23 @@ export default function TeacherEvaluatePage() {
   const [rubricId, setRubricId] = useState<string | null>(null);
   const [rubric, setRubric] = useState<Rubric | null>(null);
 
-  // ====== Chọn sinh viên ======
+  /** ====== Chọn sinh viên ====== */
   const [students, setStudents] = useState<Student[]>([]);
   const [studentFilter, setStudentFilter] = useState('');
   const [mssvQuick, setMssvQuick] = useState('');
   const [student, setStudent] = useState<Student | null>(null);
 
-  // ====== Chấm rubric ======
+  /** ====== Chấm rubric ====== */
   const [grading, setGrading] = useState<Record<string, { selected_level?: string; comment?: string }>>({});
   const [overallComment, setOverallComment] = useState('');
   const [editingObservationId, setEditingObservationId] = useState<string | null>(null);
   const [loadingRubric, setLoadingRubric] = useState(false);
 
-  // ====== Lịch sử ======
+  /** ====== Lịch sử ====== */
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [histQ, setHistQ] = useState('');
 
-  // --- load frameworks ---
+  /* --- Load frameworks --- */
   useEffect(() => {
     (async () => {
       const r = await fetch('/api/common/frameworks', { cache: 'no-store' });
@@ -81,7 +119,7 @@ export default function TeacherEvaluatePage() {
     })();
   }, []);
 
-  // --- khi chọn framework: load courses + students và reset chain ---
+  /* --- Khi chọn framework: load courses + students và reset chain --- */
   useEffect(() => {
     setCourseCode('');
     setRubricId(null);
@@ -93,7 +131,10 @@ export default function TeacherEvaluatePage() {
     setEditingObservationId(null);
     setHistory([]);
 
-    if (!frameworkId) { setCourses([]); return; }
+    if (!frameworkId) {
+      setCourses([]);
+      return;
+    }
 
     (async () => {
       const p = new URLSearchParams({ framework_id: frameworkId });
@@ -110,7 +151,7 @@ export default function TeacherEvaluatePage() {
     })();
   }, [frameworkId]);
 
-  // --- khi chọn course: load rubrics & reset các phần sau ---
+  /* --- Khi chọn course: load rubrics & reset các phần sau --- */
   useEffect(() => {
     setRubricId(null);
     setRubric(null);
@@ -119,16 +160,22 @@ export default function TeacherEvaluatePage() {
     setOverallComment('');
     setEditingObservationId(null);
 
-    if (!frameworkId || !courseCode) { setRubrics([]); return; }
+    if (!frameworkId || !courseCode) {
+      setRubrics([]);
+      return;
+    }
     const p = new URLSearchParams({ framework_id: frameworkId, course_code: courseCode });
 
-    devFetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => setRubrics(d.items || []))
+    authFetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        const items = Array.isArray(d.items) ? d.items.map((x: any) => normalizeRubric(x)) : [];
+        setRubrics(items.filter(Boolean) as Rubric[]);
+      })
       .catch(() => setRubrics([]));
   }, [frameworkId, courseCode]);
 
-  // --- khi chọn rubric: tải chi tiết rubric ---
+  /* --- Khi chọn rubric: tải chi tiết rubric --- */
   useEffect(() => {
     setRubric(null);
     setStudent(null);
@@ -138,56 +185,62 @@ export default function TeacherEvaluatePage() {
     if (!rubricId) return;
 
     setLoadingRubric(true);
-    devFetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => setRubric(d.item || null))
+    authFetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => setRubric(normalizeRubric(d.item)))
       .finally(() => setLoadingRubric(false));
   }, [rubricId]);
 
-  // --- Lịch sử (theo framework/course, có thể lọc thêm bằng q) ---
+  /* --- Lịch sử (theo framework/course, có thể lọc thêm bằng q) --- */
   async function loadHistory() {
-    if (!frameworkId) { setHistory([]); return; }
+    if (!frameworkId) {
+      setHistory([]);
+      return;
+    }
     const p = new URLSearchParams();
     p.set('framework_id', frameworkId);
     if (courseCode) p.set('course_code', courseCode);
     if (histQ.trim()) p.set('q', histQ.trim());
-    const r = await devFetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
+    const r = await authFetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
     const d = await r.json();
-    setHistory(r.ok ? (d.items || []) : []);
+    setHistory(r.ok ? d.items || [] : []);
   }
-  useEffect(() => { loadHistory(); /* eslint-disable-next-line */ }, [frameworkId, courseCode]);
+  useEffect(() => {
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameworkId, courseCode]);
 
-  // --- Lọc dropdown sinh viên theo gõ nhanh ---
+  /* --- Lọc dropdown sinh viên theo gõ nhanh --- */
   const filteredStudents = useMemo(() => {
     const q = studentFilter.trim().toLowerCase();
     if (!q) return students;
-    return students.filter(s =>
-      (s.mssv || '').toLowerCase().includes(q) ||
-      (s.full_name || '').toLowerCase().includes(q)
+    return students.filter(
+      (s) => (s.mssv || '').toLowerCase().includes(q) || (s.full_name || '').toLowerCase().includes(q),
     );
   }, [students, studentFilter]);
 
   async function quickFindMssv() {
     if (!mssvQuick.trim()) return;
-    const r = await devFetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
+    const r = await authFetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
     const d = await r.json();
     if (!r.ok) return alert(d.error || 'Không tìm thấy MSSV');
     setStudent(d.student);
   }
 
-  // --- helpers chấm ---
-  const rows: RubricItem[]   = useMemo(() => rubric?.definition?.rows || [], [rubric]);
+  /* --- Helpers chấm --- */
+  const rows: RubricItem[] = useMemo(() => rubric?.definition?.rows || [], [rubric]);
   const cols: RubricColumn[] = useMemo(() => rubric?.definition?.columns || [], [rubric]);
 
   function pickLevel(rowId: string, key: string) {
-    setGrading(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), selected_level: key } }));
+    setGrading((s) => ({ ...s, [rowId]: { ...(s[rowId] || {}), selected_level: key } }));
   }
   function setRowComment(rowId: string, txt: string) {
-    setGrading(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), comment: txt } }));
+    setGrading((s) => ({ ...s, [rowId]: { ...(s[rowId] || {}), comment: txt } }));
   }
 
-  async function submitObservation(status: 'draft'|'submitted') {
+  async function submitObservation(status: 'draft' | 'submitted') {
     if (!rubric || !student) return alert('Hãy chọn rubric và sinh viên.');
+
     const payload = {
       id: editingObservationId || undefined,
       rubric_id: rubric.id,
@@ -202,7 +255,8 @@ export default function TeacherEvaluatePage() {
         comment: v.comment || null,
       })),
     };
-    const r = await devFetch('/api/teacher/observations', {
+
+    const r = await authFetch('/api/teacher/observations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -221,20 +275,24 @@ export default function TeacherEvaluatePage() {
     if (h.framework_id) setFrameworkId(h.framework_id);
     if (h.course_code) setCourseCode(h.course_code);
     setRubricId(h.rubric_id);
-    setStudent({ user_id: h.student_user_id, mssv: h.student_mssv || '', full_name: h.student_full_name || '' });
+    setStudent({
+      user_id: h.student_user_id,
+      mssv: h.student_mssv || '',
+      full_name: h.student_full_name || '',
+    });
     setEditingObservationId(h.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function deleteObs(id: string) {
     if (!confirm('Xoá bản chấm này?')) return;
-    const r = await devFetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await authFetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return alert(d.error || 'Xoá thất bại.');
     await loadHistory();
   }
 
-  // ====================== UI ======================
+  /** ====================== UI ====================== */
   return (
     <section className="space-y-4">
       {/* Filter bar */}
@@ -246,7 +304,11 @@ export default function TeacherEvaluatePage() {
             onChange={(e) => setFrameworkId(e.target.value)}
           >
             <option value="">-- Chọn khung --</option>
-            {frameworks.map(f => <option key={f.id} value={f.id} className="text-slate-900">{f.label}</option>)}
+            {frameworks.map((f) => (
+              <option key={f.id} value={f.id} className="text-slate-900">
+                {f.label}
+              </option>
+            ))}
           </select>
 
           <select
@@ -256,7 +318,7 @@ export default function TeacherEvaluatePage() {
             disabled={!frameworkId}
           >
             <option value="">-- Chọn học phần --</option>
-            {courses.map(c => (
+            {courses.map((c) => (
               <option key={c.course_code} value={c.course_code} className="text-slate-900">
                 {c.course_code} — {c.course_name || c.course_code}
               </option>
@@ -270,7 +332,11 @@ export default function TeacherEvaluatePage() {
             disabled={!courseCode}
           >
             <option value="">-- Chọn rubric --</option>
-            {rubrics.map(r => <option key={r.id} value={r.id} className="text-slate-900">{r.name}</option>)}
+            {rubrics.map((r) => (
+              <option key={r.id} value={r.id} className="text-slate-900">
+                {r.name}
+              </option>
+            ))}
           </select>
 
           <div className="flex items-center">
@@ -282,7 +348,9 @@ export default function TeacherEvaluatePage() {
       {/* Student picker */}
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold mb-2">Chọn sinh viên để chấm</div>
-        {!rubric && <div className="text-sm text-slate-500">Chọn khung, học phần và rubric trước khi chọn sinh viên.</div>}
+        {!rubric && (
+          <div className="text-sm text-slate-500">Chọn khung, học phần và rubric trước khi chọn sinh viên.</div>
+        )}
 
         <div className="grid md:grid-cols-3 gap-3 mt-1">
           <div className="md:col-span-2 flex flex-col sm:flex-row gap-2">
@@ -290,20 +358,20 @@ export default function TeacherEvaluatePage() {
               placeholder="Tìm nhanh MSSV / họ tên"
               className="h-10 rounded-xl border border-slate-300 px-3 text-sm flex-1"
               value={studentFilter}
-              onChange={(e)=>setStudentFilter(e.target.value)}
+              onChange={(e) => setStudentFilter(e.target.value)}
               disabled={!rubric}
             />
             <select
               className="h-10 rounded-xl border border-slate-300 px-3 text-sm text-slate-900 sm:w-80"
               value={student?.user_id ?? ''}
               onChange={(e) => {
-                const sv = students.find(s => s.user_id === e.target.value) || null;
+                const sv = students.find((s) => s.user_id === e.target.value) || null;
                 setStudent(sv);
               }}
               disabled={!rubric}
             >
               <option value="">-- Chọn sinh viên --</option>
-              {filteredStudents.map(s => (
+              {filteredStudents.map((s) => (
                 <option key={s.user_id} value={s.user_id} className="text-slate-900">
                   {s.mssv} — {s.full_name || 'SV'}
                 </option>
@@ -315,7 +383,7 @@ export default function TeacherEvaluatePage() {
               className="h-10 rounded-xl border border-slate-300 px-3 text-sm flex-1"
               placeholder="Nhập MSSV để tìm nhanh"
               value={mssvQuick}
-              onChange={(e)=>setMssvQuick(e.target.value)}
+              onChange={(e) => setMssvQuick(e.target.value)}
               disabled={!rubric}
             />
             <button
@@ -335,34 +403,44 @@ export default function TeacherEvaluatePage() {
         {rubric && (
           <>
             <div className="mb-2 text-sm text-slate-600">
-              Rubric: <b>{rubric.name}</b> {student ? <>• SV: <b>{student.full_name}</b> ({student.mssv})</> : null}
+              Rubric: <b>{rubric.name}</b>{' '}
+              {student ? (
+                <>
+                  • SV: <b>{student.full_name}</b> ({student.mssv})
+                </>
+              ) : null}
             </div>
 
             {loadingRubric ? (
               <div className="h-24 rounded-xl bg-slate-100 animate-pulse" />
             ) : (
               <div className="space-y-4">
-                {rows.map(row => (
+                {rows.map((row) => (
                   <div key={row.id} className="border border-slate-200 rounded-xl p-3">
                     <div className="font-medium">{row.label}</div>
                     <div className="mt-2 flex flex-wrap gap-3">
-                      {cols.map(c => (
-                        <label key={c.key} className="inline-flex items-center gap-2 text-sm">
-                          <input
-                            type="radio"
-                            name={`row_${row.id}`}
-                            checked={grading[row.id]?.selected_level === c.key}
-                            onChange={() => pickLevel(row.id, c.key)}
-                          />
-                          <span>{c.label}</span>
-                        </label>
-                      ))}
+                      {cols
+                        .filter((c) => c && c.key)
+                        .map((c) => (
+                          <label key={c.key} className="inline-flex items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name={`row_${row.id}`}
+                              checked={grading[row.id]?.selected_level === c.key}
+                              onChange={() => pickLevel(row.id, c.key)}
+                            />
+                            <span>{c.label}</span>
+                          </label>
+                        ))}
+                      {cols.length === 0 && (
+                        <span className="text-xs text-slate-500">Rubric chưa có cột mức đánh giá.</span>
+                      )}
                     </div>
                     <textarea
                       placeholder="Nhận xét cho tiêu chí này (tuỳ chọn)"
                       className="mt-2 w-full rounded-xl border border-slate-300 p-2 text-sm"
                       value={grading[row.id]?.comment || ''}
-                      onChange={(e)=>setRowComment(row.id, e.target.value)}
+                      onChange={(e) => setRowComment(row.id, e.target.value)}
                     />
                     {row.clo_ids?.length ? (
                       <div className="mt-1 text-xs text-slate-500">Liên quan CLO: {row.clo_ids.join(', ')}</div>
@@ -374,19 +452,19 @@ export default function TeacherEvaluatePage() {
                     placeholder="Nhận xét tổng quan"
                     className="w-full rounded-xl border border-slate-300 p-2 text-sm"
                     value={overallComment}
-                    onChange={(e)=>setOverallComment(e.target.value)}
+                    onChange={(e) => setOverallComment(e.target.value)}
                   />
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={()=>submitObservation('draft')}
+                    onClick={() => submitObservation('draft')}
                     className="h-10 px-4 rounded-xl border border-slate-200 text-sm hover:bg-slate-50"
                     disabled={!student}
                   >
                     Lưu nháp
                   </button>
                   <button
-                    onClick={()=>submitObservation('submitted')}
+                    onClick={() => submitObservation('submitted')}
                     className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm hover:opacity-95 active:scale-[0.99]"
                     disabled={!student}
                   >
@@ -408,9 +486,11 @@ export default function TeacherEvaluatePage() {
               className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
               placeholder="Tìm MSSV / họ tên"
               value={histQ}
-              onChange={(e)=>setHistQ(e.target.value)}
+              onChange={(e) => setHistQ(e.target.value)}
             />
-            <button onClick={loadHistory} className="h-10 px-3 rounded-xl border text-sm hover:bg-slate-50">Lọc</button>
+            <button onClick={loadHistory} className="h-10 px-3 rounded-xl border text-sm hover:bg-slate-50">
+              Lọc
+            </button>
           </div>
         </div>
 
@@ -418,13 +498,15 @@ export default function TeacherEvaluatePage() {
           <table className="min-w-[900px] w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {['Thời gian','MSSV','Họ tên','Học phần','Rubric','Trạng thái','Thao tác'].map(h => (
-                  <th key={h} className="px-3 py-2 text-left border-b">{h}</th>
+                {['Thời gian', 'MSSV', 'Họ tên', 'Học phần', 'Rubric', 'Trạng thái', 'Thao tác'].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left border-b">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {history.map(h => (
+              {history.map((h) => (
                 <tr key={h.id} className="odd:bg-gray-50">
                   <td className="px-3 py-2 border-b">{new Date(h.created_at).toLocaleString()}</td>
                   <td className="px-3 py-2 border-b">{h.student_mssv || '—'}</td>
@@ -434,14 +516,22 @@ export default function TeacherEvaluatePage() {
                   <td className="px-3 py-2 border-b">{h.status === 'submitted' ? 'Đã gửi' : 'Nháp'}</td>
                   <td className="px-3 py-2 border-b">
                     <div className="flex gap-2">
-                      <button className="text-blue-700 hover:underline" onClick={()=>startEdit(h)}>Sửa</button>
-                      <button className="text-red-700 hover:underline" onClick={()=>deleteObs(h.id)}>Xoá</button>
+                      <button className="text-blue-700 hover:underline" onClick={() => startEdit(h)}>
+                        Sửa
+                      </button>
+                      <button className="text-red-700 hover:underline" onClick={() => deleteObs(h.id)}>
+                        Xoá
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
               {history.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-500">Chưa có bản chấm nào.</td></tr>
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
+                    Chưa có bản chấm nào.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
