@@ -38,7 +38,7 @@ export const supabaseAdmin: SupabaseClient | undefined = (() => {
 /* ----------------------- Server clients (RLS, có session) ------------------- */
 // Dùng trong Route Handlers (ví dụ: app/api/.../route.ts).
 // Đọc session từ cookie (cookie đã được refresh bởi middleware).
-export function getSupabaseFromRequest(): SupabaseClient {
+export function getSupabaseFromRequest(_req?: Request): SupabaseClient {
   const cookieStore = cookies();
   return createRouteHandlerClient({ cookies: () => cookieStore }) as unknown as SupabaseClient;
 }
