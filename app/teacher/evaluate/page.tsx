@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { authFetch } from '@/lib/authFetch';
+import { authFetch } from '@/lib/authFetch'; // vẫn import được, nhưng có fallback
 
 type FrameworkOpt = { id: string; label: string };
 type CourseOpt    = { course_code: string; course_name?: string | null };
@@ -36,6 +36,15 @@ type HistoryRow = {
   rubric_id: string;
   rubric_title?: string | null;
 };
+
+// --- helper: thử authFetch, nếu 401 thì dùng fetch thường (dev, chưa đăng nhập)
+async function devFetch(input: RequestInfo | URL, init?: RequestInit) {
+  try {
+    const r = await authFetch(input as any, init);
+    if (r.status !== 401) return r;
+  } catch {}
+  return fetch(input, init);
+}
 
 export default function TeacherEvaluatePage() {
   // ====== Bộ lọc: khung → học phần → rubric ======
@@ -113,7 +122,7 @@ export default function TeacherEvaluatePage() {
     if (!frameworkId || !courseCode) { setRubrics([]); return; }
     const p = new URLSearchParams({ framework_id: frameworkId, course_code: courseCode });
 
-    authFetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
+    devFetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setRubrics(d.items || []))
       .catch(() => setRubrics([]));
@@ -129,7 +138,7 @@ export default function TeacherEvaluatePage() {
     if (!rubricId) return;
 
     setLoadingRubric(true);
-    authFetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
+    devFetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setRubric(d.item || null))
       .finally(() => setLoadingRubric(false));
@@ -142,7 +151,7 @@ export default function TeacherEvaluatePage() {
     p.set('framework_id', frameworkId);
     if (courseCode) p.set('course_code', courseCode);
     if (histQ.trim()) p.set('q', histQ.trim());
-    const r = await authFetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
+    const r = await devFetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
     const d = await r.json();
     setHistory(r.ok ? (d.items || []) : []);
   }
@@ -160,7 +169,7 @@ export default function TeacherEvaluatePage() {
 
   async function quickFindMssv() {
     if (!mssvQuick.trim()) return;
-    const r = await authFetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
+    const r = await devFetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
     const d = await r.json();
     if (!r.ok) return alert(d.error || 'Không tìm thấy MSSV');
     setStudent(d.student);
@@ -174,9 +183,6 @@ export default function TeacherEvaluatePage() {
     setGrading(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), selected_level: key } }));
   }
   function setRowComment(rowId: string, txt: string) {
-    setGragingSafe(rowId, txt);
-  }
-  function setGragingSafe(rowId: string, txt: string) {
     setGrading(s => ({ ...s, [rowId]: { ...(s[rowId] || {}), comment: txt } }));
   }
 
@@ -196,7 +202,7 @@ export default function TeacherEvaluatePage() {
         comment: v.comment || null,
       })),
     };
-    const r = await authFetch('/api/teacher/observations', {
+    const r = await devFetch('/api/teacher/observations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -212,10 +218,8 @@ export default function TeacherEvaluatePage() {
   }
 
   function startEdit(h: HistoryRow) {
-    // cố gắng đồng bộ filter để rubric hiện đúng
     if (h.framework_id) setFrameworkId(h.framework_id);
     if (h.course_code) setCourseCode(h.course_code);
-
     setRubricId(h.rubric_id);
     setStudent({ user_id: h.student_user_id, mssv: h.student_mssv || '', full_name: h.student_full_name || '' });
     setEditingObservationId(h.id);
@@ -224,7 +228,7 @@ export default function TeacherEvaluatePage() {
 
   async function deleteObs(id: string) {
     if (!confirm('Xoá bản chấm này?')) return;
-    const r = await authFetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await devFetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return alert(d.error || 'Xoá thất bại.');
     await loadHistory();
