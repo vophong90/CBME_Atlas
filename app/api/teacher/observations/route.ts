@@ -26,7 +26,7 @@ export async function GET(req: Request) {
     const framework_id = url.searchParams.get('framework_id') || undefined;
     const course_code  = url.searchParams.get('course_code')  || undefined;
     const q            = url.searchParams.get('q')            || undefined;
-    const mssv         = url.searchParams.get('mssv')         || undefined; // vẫn giữ tương thích cũ
+    const mssv         = url.searchParams.get('mssv')         || undefined; // giữ tương thích cũ
 
     // 1) Lấy danh sách observations của GV đang đăng nhập
     let base = supabase
@@ -42,26 +42,26 @@ export async function GET(req: Request) {
     if (obsErr) return NextResponse.json({ error: obsErr.message }, { status: 400 });
     if (!obs || obs.length === 0) return NextResponse.json({ items: [] });
 
-    // 2) Gom list SV & Rubric để tra thông tin hiển thị
+    // 2) Tra cứu tên SV & tên rubric bằng service role (tránh RLS)
+    const admin = createServiceClient();
+
     const studentIds = Array.from(new Set(obs.map(o => o.student_user_id).filter(Boolean))) as string[];
     const rubricIds  = Array.from(new Set(obs.map(o => o.rubric_id).filter(Boolean))) as string[];
 
-    // lấy MSSV/họ tên
-    const { data: students, error: stuErr } = await supabase
+    const { data: students, error: stuErr } = await admin
       .from('students')
       .select('user_id,mssv,full_name')
-      .in('user_id', studentIds.length ? studentIds : ['___empty___']);
-    if (stuErr) return NextResponse.json({ error: stuErr.message }, { status: 400 });
+      .in('user_id', studentIds.length ? studentIds : ['__empty__']);
+    if (stuErr && stuErr.code !== '42P01') return NextResponse.json({ error: stuErr.message }, { status: 400 });
 
-    // lấy tiêu đề rubric
-    const { data: rubrics, error: rubErr } = await supabase
+    const { data: rubrics, error: rubErr } = await admin
       .from('rubrics')
       .select('id,title')
       .in('id', rubricIds.length ? rubricIds : ['00000000-0000-0000-0000-000000000000']);
-    if (rubErr) return NextResponse.json({ error: rubErr.message }, { status: 400 });
+    if (rubErr && rubErr.code !== '42P01') return NextResponse.json({ error: rubErr.message }, { status: 400 });
 
-    const stuMap = new Map(students?.map(s => [s.user_id, s]) ?? []);
-    const rubMap = new Map(rubrics?.map(r => [r.id, r]) ?? []);
+    const stuMap = new Map((students ?? []).map(s => [s.user_id, s]));
+    const rubMap = new Map((rubrics  ?? []).map(r => [r.id, r]));
 
     // 3) Build items kèm tên SV, MSSV, tiêu đề rubric
     let items = obs.map(o => {
@@ -113,7 +113,7 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = (await req.json().catch(() => ({}))) as {
-      id?: string; // nếu PATCH thì gửi id (để update)
+      id?: string; // nếu cập nhật thì gửi id
       rubric_id?: string;                // UUID (string)
       student_user_id?: string;
       framework_id?: string | null;
@@ -139,7 +139,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Nếu có id -> cập nhật observation hiện có (thuận tiện khi sửa nháp)
+    // CẬP NHẬT (nếu có id)
     if (id) {
       const { data: obs0, error: chkErr } = await supabase
         .from('observations')
@@ -168,7 +168,7 @@ export async function POST(req: Request) {
 
       if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 });
 
-      // xoá scores cũ & chèn lại (đơn giản, tránh merge phức tạp)
+      // xoá scores cũ & chèn lại
       await supabase.from('observation_item_scores').delete().eq('observation_id', id);
 
       if (items.length > 0) {
@@ -188,7 +188,7 @@ export async function POST(req: Request) {
         const { error: rerr } = await admin.rpc('compute_observation_clo_results', {
           p_observation_id: obsUpd.id,
         });
-        if (rerr) {
+        if (rerr && rerr.code !== '42883') { // 42883 = function does not exist
           return NextResponse.json(
             { error: `compute_observation_clo_results: ${rerr.message}` },
             { status: 400 }
@@ -199,13 +199,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ observation: obsUpd });
     }
 
-    // 1) Tạo observation mới
+    // TẠO MỚI
     const { data: obs, error: oerr } = await supabase
       .from('observations')
       .insert({
         rubric_id,
         student_user_id,
-        teacher_user_id: user.id, // RLS policy cần cho phép cột này
+        teacher_user_id: user.id,
         framework_id,
         course_code,
         status,
@@ -217,7 +217,6 @@ export async function POST(req: Request) {
 
     if (oerr) return NextResponse.json({ error: oerr.message }, { status: 400 });
 
-    // 2) Chèn item scores
     if (items.length > 0) {
       const payload = items.map((it) => ({
         observation_id: obs.id,
@@ -230,13 +229,12 @@ export async function POST(req: Request) {
       if (serr) return NextResponse.json({ error: serr.message }, { status: 400 });
     }
 
-    // 3) Nếu submitted -> tính CLO kết quả
     if (status === 'submitted') {
       const admin = createServiceClient();
       const { error: rerr } = await admin.rpc('compute_observation_clo_results', {
         p_observation_id: obs.id,
       });
-      if (rerr) {
+      if (rerr && rerr.code !== '42883') {
         return NextResponse.json(
           { error: `compute_observation_clo_results: ${rerr.message}` },
           { status: 400 }
@@ -245,6 +243,39 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ observation: obs });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const supabase = getSupabase();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id') || '';
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+    // chỉ cho xoá bản của chính GV
+    const { data: obs0, error: chkErr } = await supabase
+      .from('observations')
+      .select('id,teacher_user_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (chkErr) return NextResponse.json({ error: chkErr.message }, { status: 400 });
+    if (!obs0 || obs0.teacher_user_id !== user.id) {
+      return NextResponse.json({ error: 'Không có quyền xoá bản chấm này' }, { status: 403 });
+    }
+
+    await supabase.from('observation_item_scores').delete().eq('observation_id', id);
+    const { error: derr } = await supabase.from('observations').delete().eq('id', id);
+    if (derr) return NextResponse.json({ error: derr.message }, { status: 400 });
+
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
   }
