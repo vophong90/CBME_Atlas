@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // +++
 
 type FrameworkOpt = { id: string; label: string };
 type StudentOpt   = { user_id: string; mssv: string; full_name: string; label: string };
@@ -19,6 +20,16 @@ const INPUT =
   'h-10 text-sm rounded-lg border border-slate-300 px-3 outline-none focus:ring-2 focus:ring-brand-300';
 
 export default function TeacherStudentPage() {
+  const supabase = createClientComponentClient(); // +++ lấy client để đọc session
+
+  // Helper tạo headers Authorization từ session hiện tại
+  const authHeaders = async () => {                // +++
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token
+      ? { Authorization: `Bearer ${session.access_token}` }
+      : {};
+  };
+
   const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
   const [frameworkId, setFrameworkId] = useState('');
   const [students, setStudents] = useState<StudentOpt[]>([]);
@@ -31,15 +42,19 @@ export default function TeacherStudentPage() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/frameworks', { credentials: 'include' });
+        const r = await fetch('/api/frameworks', {
+          credentials: 'include',
+          headers: await authHeaders(),             // +++
+        });
         const d = await r.json();
         if (r.ok) {
           setFrameworks(d.items || []);
-          // tự chọn khung đầu tiên nếu chưa chọn
           if (!frameworkId && d.items?.[0]?.id) setFrameworkId(d.items[0].id);
+        } else {
+          console.error('frameworks error:', d);
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error(e);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -56,6 +71,7 @@ export default function TeacherStudentPage() {
       try {
         const r = await fetch(`/api/teacher/students?framework_id=${frameworkId}`, {
           credentials: 'include',
+          headers: await authHeaders(),             // +++
         });
         const d = await r.json();
         if (r.ok) {
@@ -69,7 +85,7 @@ export default function TeacherStudentPage() {
         alert(e?.message || 'Lỗi tải danh sách sinh viên');
       }
     })();
-  }, [frameworkId]);
+  }, [frameworkId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tải CLO chưa đạt của 1 SV
   async function loadPending() {
@@ -83,6 +99,7 @@ export default function TeacherStudentPage() {
       p.set('framework_id', frameworkId);
       const r = await fetch(`/api/teacher/student-pending-clos?${p.toString()}`, {
         credentials: 'include',
+        headers: await authHeaders(),               // +++
       });
       const d = await r.json();
       if (r.ok) {
