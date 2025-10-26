@@ -1,148 +1,133 @@
-// app/teacher/student/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 type FrameworkOpt = { id: string; label: string };
-type PendingRow = {
+type StudentOpt   = { user_id: string; mssv: string; full_name: string; label: string };
+
+type Row = {
   mssv: string;
   full_name: string;
   course_code: string;
   course_name: string;
   clo_code: string;
-  clo_text: string | null;   // <— đổi từ clo_title -> clo_text
+  clo_text: string | null;
   updated_at: string;
 };
 
+const INPUT = 'h-10 text-sm rounded-lg border border-slate-300 px-3 outline-none focus:ring-2 focus:ring-brand-300';
+
 export default function TeacherStudentPage() {
   const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
-  const [frameworkId, setFrameworkId] = useState<string>('');
-  const [q, setQ] = useState('');
-  const [courseCode, setCourseCode] = useState('');
+  const [frameworkId, setFrameworkId] = useState('');
+  const [students, setStudents] = useState<StudentOpt[]>([]);
+  const [studentUserId, setStudentUserId] = useState('');
 
-  const [items, setItems] = useState<PendingRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [matchedStudents, setMatchedStudents] = useState(0);
-
-  const [limit] = useState(50);
-  const [offset, setOffset] = useState(0);
-
+  const [items, setItems] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
-  const [typing, setTyping] = useState(false);
 
-  // Load frameworks
+  // Load khung
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/frameworks');
         const d = await r.json();
-        if (r.ok) {
-          setFrameworks(d.items || []);
-          if (!frameworkId && d.items?.[0]?.id) setFrameworkId(d.items[0].id);
-        }
+        if (r.ok) setFrameworks(d.items || []);
       } catch {}
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounce nhập q
+  // Khi chọn khung -> load danh sách SV của khung
   useEffect(() => {
-    setTyping(true);
-    const t = setTimeout(() => setTyping(false), 300);
-    return () => clearTimeout(t);
-  }, [q]);
+    setStudents([]);
+    setStudentUserId('');
+    setItems([]);
+    if (!frameworkId) return;
 
-  // Fetch pending-clos khi filter ổn định
-  useEffect(() => {
-    if (!frameworkId || typing) return;
     (async () => {
-      setLoading(true);
       try {
-        const p = new URLSearchParams();
-        p.set('framework_id', frameworkId);
-        if (q) p.set('q', q);
-        if (courseCode) p.set('course_code', courseCode);
-        p.set('limit', String(limit));
-        p.set('offset', String(offset));
-
-        const r = await fetch(`/api/teacher/pending-clos?${p.toString()}`);
+        const r = await fetch(`/api/teacher/students?framework_id=${frameworkId}`);
         const d = await r.json();
         if (r.ok) {
-          setItems(d.items || []);
-          setTotal(d.total || 0);
-          setMatchedStudents(d.matched_students || 0);
+          setStudents(d.items || []);
         } else {
-          setItems([]);
-          setTotal(0);
-          setMatchedStudents(0);
-          alert(d.error || 'Lỗi tải dữ liệu');
+          setStudents([]);
+          alert(d.error || 'Lỗi tải danh sách sinh viên');
         }
       } catch (e: any) {
-        setItems([]);
-        setTotal(0);
-        setMatchedStudents(0);
-        alert(e?.message || 'Lỗi tải dữ liệu');
-      } finally {
-        setLoading(false);
+        setStudents([]);
+        alert(e?.message || 'Lỗi tải danh sách sinh viên');
       }
     })();
-  }, [frameworkId, q, courseCode, limit, offset, typing]);
+  }, [frameworkId]);
 
+  // Tải CLO chưa đạt của 1 SV
+  async function loadPending() {
+    if (!frameworkId) return alert('Vui lòng chọn Khung');
+    if (!studentUserId) return alert('Vui lòng chọn Sinh viên');
+
+    setLoading(true);
+    try {
+      const p = new URLSearchParams();
+      p.set('student_user_id', studentUserId);
+      p.set('framework_id', frameworkId);
+      const r = await fetch(`/api/teacher/student-pending-clos?${p.toString()}`);
+      const d = await r.json();
+      if (r.ok) {
+        setItems(d.items || []);
+      } else {
+        setItems([]);
+        alert(d.error || 'Lỗi tải CLO chưa đạt');
+      }
+    } catch (e: any) {
+      setItems([]);
+      alert(e?.message || 'Lỗi tải CLO chưa đạt');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Tự tải khi đổi SV
   useEffect(() => {
-    setOffset(0);
-  }, [frameworkId, q, courseCode]);
-
-  const page = useMemo(() => Math.floor(offset / limit) + 1, [offset, limit]);
-  const pageCount = useMemo(() => Math.max(1, Math.ceil((total || 0) / limit)), [total, limit]);
+    if (frameworkId && studentUserId) loadPending();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentUserId]);
 
   return (
     <section className="space-y-4">
-      {/* Bộ lọc */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-3">
-          <select
-            className="rounded-xl border border-slate-300 px-3 py-2"
-            value={frameworkId}
-            onChange={(e) => setFrameworkId(e.target.value)}
-          >
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid md:grid-cols-3 gap-3">
+          {/* Khung */}
+          <select className={INPUT} value={frameworkId} onChange={(e)=>setFrameworkId(e.target.value)}>
             <option value="">— Chọn Khung —</option>
-            {frameworks.map((f) => (
-              <option key={f.id} value={f.id}>{f.label}</option>
-            ))}
+            {frameworks.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
           </select>
 
-          <input
-            className="rounded-xl border border-slate-300 px-3 py-2"
-            placeholder="Tìm nhanh sinh viên (MSSV hoặc Họ tên)"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+          {/* Sinh viên */}
+          <select className={INPUT} value={studentUserId} onChange={(e)=>setStudentUserId(e.target.value)} disabled={!frameworkId || students.length===0}>
+            <option value="">{frameworkId ? (students.length ? '— Chọn Sinh viên —' : 'Không có SV trong khung') : 'Hãy chọn Khung trước'}</option>
+            {students.map(s => <option key={s.user_id} value={s.user_id}>{s.label}</option>)}
+          </select>
 
-          <input
-            className="rounded-xl border border-slate-300 px-3 py-2"
-            placeholder="Mã học phần (lọc tuỳ chọn)"
-            value={courseCode}
-            onChange={(e) => setCourseCode(e.target.value)}
-          />
-
-          <div className="flex items-center text-sm text-slate-600">
-            <div className="rounded-xl border border-slate-200 px-3 py-2 w-full">
-              {frameworkId
-                ? <>Đã khớp <b>{matchedStudents}</b> SV • Tổng dòng CLO chưa đạt: <b>{total}</b></>
-                : <>Hãy chọn Khung trước</>}
-            </div>
-          </div>
+          {/* Nút tải lại */}
+          <button
+            className="h-10 text-sm rounded-lg bg-slate-900 text-white px-3 hover:opacity-95 disabled:opacity-50"
+            onClick={loadPending}
+            disabled={!frameworkId || !studentUserId || loading}
+          >
+            {loading ? 'Đang tải…' : 'Tải CLO chưa đạt'}
+          </button>
         </div>
       </div>
 
-      {/* Bảng */}
+      {/* Bảng 5 cột */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <div className="font-medium">CLO đã học nhưng <span className="text-red-600">chưa đạt</span></div>
-          <div className="text-sm text-slate-500">Trang {page}/{pageCount} • {total} dòng</div>
+        <div className="px-4 py-3 border-b border-slate-200 font-medium">
+          CLO đã học nhưng <span className="text-red-600">chưa đạt</span>
         </div>
 
-        <div className="grid grid-cols-5 gap-0 px-4 py-2 text-xs font-semibold text-slate-500 bg-slate-50">
+        {/* Header */}
+        <div className="grid grid-cols-5 px-4 py-2 text-xs font-semibold text-slate-500 bg-slate-50">
           <div>MSSV</div>
           <div>Họ tên</div>
           <div>Tên học phần</div>
@@ -150,57 +135,34 @@ export default function TeacherStudentPage() {
           <div>Nội dung CLO</div>
         </div>
 
+        {/* Rows */}
         {loading ? (
           <div className="divide-y divide-slate-100">
-            {Array.from({ length: 8 }).map((_, i) => (
+            {Array.from({length:6}).map((_,i)=>(
               <div key={i} className="grid grid-cols-5 gap-0 px-4 py-3 animate-pulse">
                 <div className="h-4 w-20 bg-slate-200 rounded" />
                 <div className="h-4 w-40 bg-slate-200 rounded" />
                 <div className="h-4 w-52 bg-slate-200 rounded" />
-                <div className="h-4 w-28 bg-slate-200 rounded" />
+                <div className="h-4 w-24 bg-slate-200 rounded" />
                 <div className="h-4 w-64 bg-slate-200 rounded" />
               </div>
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-500">Không có CLO chưa đạt theo bộ lọc.</div>
+          <div className="px-4 py-6 text-sm text-slate-500">Không có CLO chưa đạt.</div>
         ) : (
           <div className="divide-y divide-slate-100">
             {items.map((r, idx) => (
-              <div key={`${r.mssv}-${r.course_code}-${r.clo_code}-${idx}`} className="grid grid-cols-5 gap-0 px-4 py-2 text-sm">
+              <div key={`${r.mssv}-${r.course_code}-${r.clo_code}-${idx}`} className="grid grid-cols-5 px-4 py-2 text-sm">
                 <div className="truncate">{r.mssv}</div>
                 <div className="truncate">{r.full_name || '—'}</div>
-                <div className="truncate" title={r.course_name}>
-                  {r.course_name || r.course_code || '—'}
-                </div>
+                <div className="truncate" title={r.course_name}>{r.course_name || r.course_code || '—'}</div>
                 <div className="truncate">{r.clo_code}</div>
-                <div className="truncate" title={r.clo_text || ''}>
-                  {r.clo_text || '—'}
-                </div>
+                <div className="truncate" title={r.clo_text || ''}>{r.clo_text || '—'}</div>
               </div>
             ))}
           </div>
         )}
-
-        <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
-          <button
-            className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            disabled={offset === 0 || loading}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-          >
-            ← Trước
-          </button>
-          <div className="text-xs text-slate-500">
-            Hiển thị {items.length} / {total}
-          </div>
-          <button
-            className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            disabled={loading || offset + limit >= total}
-            onClick={() => setOffset(offset + limit)}
-          >
-            Sau →
-          </button>
-        </div>
       </div>
     </section>
   );
