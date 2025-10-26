@@ -1,3 +1,4 @@
+// app/teacher/student/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -9,7 +10,7 @@ type PendingRow = {
   course_code: string;
   course_name: string;
   clo_code: string;
-  clo_title: string | null; // sẽ hiển thị '—' nếu null
+  clo_text: string | null;   // <— đổi từ clo_title -> clo_text
   updated_at: string;
 };
 
@@ -37,12 +38,9 @@ export default function TeacherStudentPage() {
         const d = await r.json();
         if (r.ok) {
           setFrameworks(d.items || []);
-          // auto chọn khung đầu tiên nếu chưa chọn
           if (!frameworkId && d.items?.[0]?.id) setFrameworkId(d.items[0].id);
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -54,10 +52,9 @@ export default function TeacherStudentPage() {
     return () => clearTimeout(t);
   }, [q]);
 
-  // Fetch pending-clos mỗi khi filter thay đổi (và q hết typing)
+  // Fetch pending-clos khi filter ổn định
   useEffect(() => {
     if (!frameworkId || typing) return;
-
     (async () => {
       setLoading(true);
       try {
@@ -91,7 +88,6 @@ export default function TeacherStudentPage() {
     })();
   }, [frameworkId, q, courseCode, limit, offset, typing]);
 
-  // Reset về trang 1 khi đổi filter
   useEffect(() => {
     setOffset(0);
   }, [frameworkId, q, courseCode]);
@@ -104,7 +100,6 @@ export default function TeacherStudentPage() {
       {/* Bộ lọc */}
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid lg:grid-cols-4 md:grid-cols-2 gap-3">
-          {/* Chọn Khung */}
           <select
             className="rounded-xl border border-slate-300 px-3 py-2"
             value={frameworkId}
@@ -116,7 +111,6 @@ export default function TeacherStudentPage() {
             ))}
           </select>
 
-          {/* Tìm nhanh SV (MSSV/Họ tên) */}
           <input
             className="rounded-xl border border-slate-300 px-3 py-2"
             placeholder="Tìm nhanh sinh viên (MSSV hoặc Họ tên)"
@@ -124,7 +118,6 @@ export default function TeacherStudentPage() {
             onChange={(e) => setQ(e.target.value)}
           />
 
-          {/* Lọc mã học phần (tùy chọn) */}
           <input
             className="rounded-xl border border-slate-300 px-3 py-2"
             placeholder="Mã học phần (lọc tuỳ chọn)"
@@ -132,7 +125,6 @@ export default function TeacherStudentPage() {
             onChange={(e) => setCourseCode(e.target.value)}
           />
 
-          {/* Thông tin tổng quan */}
           <div className="flex items-center text-sm text-slate-600">
             <div className="rounded-xl border border-slate-200 px-3 py-2 w-full">
               {frameworkId
@@ -143,14 +135,13 @@ export default function TeacherStudentPage() {
         </div>
       </div>
 
-      {/* Bảng kết quả */}
+      {/* Bảng */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <div className="font-medium">CLO đã học nhưng <span className="text-red-600">chưa đạt</span></div>
           <div className="text-sm text-slate-500">Trang {page}/{pageCount} • {total} dòng</div>
         </div>
 
-        {/* Header */}
         <div className="grid grid-cols-5 gap-0 px-4 py-2 text-xs font-semibold text-slate-500 bg-slate-50">
           <div>MSSV</div>
           <div>Họ tên</div>
@@ -159,7 +150,6 @@ export default function TeacherStudentPage() {
           <div>Nội dung CLO</div>
         </div>
 
-        {/* Rows */}
         {loading ? (
           <div className="divide-y divide-slate-100">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -184,15 +174,14 @@ export default function TeacherStudentPage() {
                   {r.course_name || r.course_code || '—'}
                 </div>
                 <div className="truncate">{r.clo_code}</div>
-                <div className="truncate" title={r.clo_title || ''}>
-                  {r.clo_title || '—'}
+                <div className="truncate" title={r.clo_text || ''}>
+                  {r.clo_text || '—'}
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Pagination */}
         <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
           <button
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
