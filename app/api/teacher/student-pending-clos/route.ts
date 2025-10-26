@@ -1,22 +1,19 @@
-// app/api/teacher/student-pending-clos/route.ts
 import { NextResponse } from 'next/server';
-import { getSupabase } from '@/lib/getSupabaseServer';
-
+import { getSupabaseFromRequest } from '@/lib/supabaseServer';
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: Request) {
-  const supabase = await getSupabase();
+  const supabase = getSupabaseFromRequest(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const url = new URL(req.url);
-  const student_user_id = (url.searchParams.get('student_user_id') || '').trim();
-  const framework_id = (url.searchParams.get('framework_id') || '').trim() || null;
-  const course_code  = (url.searchParams.get('course_code')  || '').trim() || null;
+  const student_user_id = url.searchParams.get('student_user_id');
+  const framework_id    = url.searchParams.get('framework_id') || null;
+  const course_code     = url.searchParams.get('course_code') || null;
 
-  if (!student_user_id) {
-    return NextResponse.json({ error: 'student_user_id is required' }, { status: 400 });
-  }
+  if (!student_user_id) return NextResponse.json({ error: 'student_user_id is required' }, { status: 400 });
 
   const { data, error } = await supabase.rpc('student_pending_clos', {
     p_student_user_id: student_user_id,
@@ -25,5 +22,5 @@ export async function GET(req: Request) {
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ items: data ?? [] });
+  return NextResponse.json({ items: data });
 }
