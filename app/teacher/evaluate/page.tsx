@@ -2,13 +2,14 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { authFetch } from '@/lib/authFetch'; // <-- dùng authFetch để gửi kèm access token
 
 type FrameworkOpt = { id: string; label: string };
 type CourseOpt    = { course_code: string; course_name?: string | null };
 
 type Rubric = {
   id: string;
-  name: string;                 // mapped from rubrics.title ở API
+  name: string; // API /api/teacher/rubrics đã map từ rubrics.title -> name
   definition: {
     columns: Array<{ key: string; label: string }>;
     rows: Array<{ id: string; label: string; clo_ids?: string[] }>;
@@ -72,39 +73,59 @@ export default function TeacherEvaluatePage() {
   }, []);
 
   useEffect(() => {
-    setCourseCode(''); setRubricId(null); setRubric(null);
-    setStudents([]); setStudent(null);
+    // reset theo chain: đổi khung -> clear course/rubric/sv/history
+    setCourseCode('');
+    setRubricId(null);
+    setRubric(null);
+    setStudents([]);
+    setStudent(null);
     setHistory([]);
+
     if (!frameworkId) { setCourses([]); return; }
+
     (async () => {
       const p = new URLSearchParams({ framework_id: frameworkId });
       const r = await fetch(`/api/common/courses?${p.toString()}`, { cache: 'no-store' });
       const d = await r.json();
       setCourses(d.items || []);
     })();
-    // load students of framework for dropdown
+
     (async () => {
       const p = new URLSearchParams({ framework_id: frameworkId });
       const r = await fetch(`/api/common/students?${p.toString()}`, { cache: 'no-store' });
       const d = await r.json();
-      setStudents(d.items || []); // API trả { user_id, mssv, full_name }
+      setStudents(d.items || []);
     })();
   }, [frameworkId]);
 
   useEffect(() => {
-    setRubricId(null); setRubric(null);
+    setRubricId(null);
+    setRubric(null);
+    setStudent(null);
+    setGrading({});
+    setEditingObservationId(null);
+
     if (!frameworkId || !courseCode) { setRubrics([]); return; }
     const p = new URLSearchParams({ framework_id: frameworkId, course_code: courseCode });
-    fetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
+
+    // /api/teacher/rubrics yêu cầu phiên → dùng authFetch
+    authFetch(`/api/teacher/rubrics?${p.toString()}`, { cache: 'no-store' })
       .then(r => r.json())
-      .then(d => setRubrics(d.items || []));
+      .then(d => setRubrics(d.items || []))
+      .catch(() => setRubrics([]));
   }, [frameworkId, courseCode]);
 
   useEffect(() => {
-    setRubric(null); setStudent(null); setGrading({}); setEditingObservationId(null);
+    setRubric(null);
+    setStudent(null);
+    setGrading({});
+    setEditingObservationId(null);
+
     if (!rubricId) return;
     setLoadingRubric(true);
-    fetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
+
+    // /api/teacher/rubrics/[id] yêu cầu phiên → authFetch
+    authFetch(`/api/teacher/rubrics/${rubricId}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setRubric(d.item || null))
       .finally(() => setLoadingRubric(false));
@@ -117,7 +138,9 @@ export default function TeacherEvaluatePage() {
     p.set('framework_id', frameworkId);
     if (courseCode) p.set('course_code', courseCode);
     if (histQ.trim()) p.set('q', histQ.trim());
-    const r = await fetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
+
+    // /api/teacher/observations yêu cầu phiên → authFetch
+    const r = await authFetch(`/api/teacher/observations?${p.toString()}`, { cache: 'no-store' });
     const d = await r.json();
     if (r.ok) setHistory(d.items || []);
     else setHistory([]);
@@ -136,7 +159,8 @@ export default function TeacherEvaluatePage() {
 
   async function quickFindMssv() {
     if (!mssvQuick.trim()) return;
-    const r = await fetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
+    // /api/teacher/student-lookup yêu cầu phiên → authFetch
+    const r = await authFetch(`/api/teacher/student-lookup?mssv=${encodeURIComponent(mssvQuick.trim())}`);
     const d = await r.json();
     if (!r.ok) return alert(d.error || 'Không tìm thấy MSSV');
     setStudent(d.student);
@@ -169,15 +193,17 @@ export default function TeacherEvaluatePage() {
         comment: v.comment || null,
       })),
     };
-    const r = await fetch('/api/teacher/observations', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    // /api/teacher/observations yêu cầu phiên → authFetch
+    const r = await authFetch('/api/teacher/observations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const d = await r.json();
     if (!r.ok) return alert(d.error || 'Lỗi lưu đánh giá');
+
     alert(status === 'submitted' ? 'Đã gửi đánh giá' : 'Đã lưu nháp');
 
-    // reset nhẹ
     setEditingObservationId(null);
     setGrading({});
     setOverallComment('');
@@ -185,7 +211,7 @@ export default function TeacherEvaluatePage() {
   }
 
   function startEdit(h: HistoryRow) {
-    // mở lại form theo rubric & SV (chưa load lại từng item vì route detail chưa có)
+    // mở lại form theo rubric & SV (chưa nạp lại từng item – cần thêm API nếu muốn)
     setRubricId(h.rubric_id);
     setStudent({ user_id: h.student_user_id, mssv: h.student_mssv || '', full_name: h.student_full_name || '' });
     setEditingObservationId(h.id);
@@ -194,9 +220,10 @@ export default function TeacherEvaluatePage() {
 
   async function deleteObs(id: string) {
     if (!confirm('Xoá bản chấm này?')) return;
-    const r = await fetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const d = await r.json().catch(()=> ({}));
-    if (!r.ok) return alert(d.error || 'Xoá thất bại (cần bổ sung DELETE API).');
+    // Cần có DELETE /api/teacher/observations?id=...
+    const r = await authFetch(`/api/teacher/observations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return alert(d.error || 'Xoá thất bại.');
     await loadHistory();
   }
 
