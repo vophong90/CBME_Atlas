@@ -1,10 +1,11 @@
+// app/teacher/student/page.tsx
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // +++
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 type FrameworkOpt = { id: string; label: string };
-type StudentOpt   = { user_id: string; mssv: string; full_name: string; label: string };
+type StudentOpt = { user_id: string; mssv: string; full_name: string; label: string };
 
 type Row = {
   mssv: string;
@@ -20,14 +21,12 @@ const INPUT =
   'h-10 text-sm rounded-lg border border-slate-300 px-3 outline-none focus:ring-2 focus:ring-brand-300';
 
 export default function TeacherStudentPage() {
-  const supabase = createClientComponentClient(); // +++ lấy client để đọc session
+  const supabase = createClientComponentClient();
 
-  // Helper tạo headers Authorization từ session hiện tại
-  const authHeaders = async () => {                // +++
+  // Always return HeadersInit to satisfy TS
+  const authHeaders = async (): Promise<HeadersInit> => {
     const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token
-      ? { Authorization: `Bearer ${session.access_token}` }
-      : {};
+    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
   };
 
   const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
@@ -38,20 +37,20 @@ export default function TeacherStudentPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Load khung
+  // Load frameworks
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/frameworks', {
           credentials: 'include',
-          headers: await authHeaders(),             // +++
+          headers: await authHeaders(),
         });
         const d = await r.json();
         if (r.ok) {
           setFrameworks(d.items || []);
           if (!frameworkId && d.items?.[0]?.id) setFrameworkId(d.items[0].id);
         } else {
-          console.error('frameworks error:', d);
+          console.error('frameworks error:', d?.error || d);
         }
       } catch (e) {
         console.error(e);
@@ -60,7 +59,7 @@ export default function TeacherStudentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Khi chọn khung -> load danh sách SV của khung
+  // When framework changes -> load students
   useEffect(() => {
     setStudents([]);
     setStudentUserId('');
@@ -71,7 +70,7 @@ export default function TeacherStudentPage() {
       try {
         const r = await fetch(`/api/teacher/students?framework_id=${frameworkId}`, {
           credentials: 'include',
-          headers: await authHeaders(),             // +++
+          headers: await authHeaders(),
         });
         const d = await r.json();
         if (r.ok) {
@@ -85,9 +84,10 @@ export default function TeacherStudentPage() {
         alert(e?.message || 'Lỗi tải danh sách sinh viên');
       }
     })();
-  }, [frameworkId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameworkId]);
 
-  // Tải CLO chưa đạt của 1 SV
+  // Load student's pending CLOs
   async function loadPending() {
     if (!frameworkId) return alert('Vui lòng chọn Khung');
     if (!studentUserId) return alert('Vui lòng chọn Sinh viên');
@@ -97,9 +97,10 @@ export default function TeacherStudentPage() {
       const p = new URLSearchParams();
       p.set('student_user_id', studentUserId);
       p.set('framework_id', frameworkId);
+
       const r = await fetch(`/api/teacher/student-pending-clos?${p.toString()}`, {
         credentials: 'include',
-        headers: await authHeaders(),               // +++
+        headers: await authHeaders(),
       });
       const d = await r.json();
       if (r.ok) {
@@ -116,7 +117,7 @@ export default function TeacherStudentPage() {
     }
   }
 
-  // Tự tải khi đổi SV
+  // Auto-load when student changes
   useEffect(() => {
     if (frameworkId && studentUserId) loadPending();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,7 +127,7 @@ export default function TeacherStudentPage() {
     <section className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid md:grid-cols-3 gap-3">
-          {/* Khung */}
+          {/* Framework */}
           <select
             className={INPUT}
             value={frameworkId}
@@ -140,7 +141,7 @@ export default function TeacherStudentPage() {
             ))}
           </select>
 
-          {/* Sinh viên */}
+          {/* Student */}
           <select
             className={INPUT}
             value={studentUserId}
@@ -161,7 +162,7 @@ export default function TeacherStudentPage() {
             ))}
           </select>
 
-          {/* Nút tải lại */}
+          {/* Reload button */}
           <button
             className="h-10 text-sm rounded-lg bg-slate-900 text-white px-3 hover:opacity-95 disabled:opacity-50"
             onClick={loadPending}
@@ -172,7 +173,7 @@ export default function TeacherStudentPage() {
         </div>
       </div>
 
-      {/* Bảng 5 cột */}
+      {/* Table */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 font-medium">
           CLO đã học nhưng <span className="text-red-600">chưa đạt</span>
@@ -191,10 +192,7 @@ export default function TeacherStudentPage() {
         {loading ? (
           <div className="divide-y divide-slate-100">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="grid grid-cols-5 gap-0 px-4 py-3 animate-pulse"
-              >
+              <div key={i} className="grid grid-cols-5 gap-0 px-4 py-3 animate-pulse">
                 <div className="h-4 w-20 bg-slate-200 rounded" />
                 <div className="h-4 w-40 bg-slate-200 rounded" />
                 <div className="h-4 w-52 bg-slate-200 rounded" />
@@ -208,9 +206,7 @@ export default function TeacherStudentPage() {
             Hãy chọn <b>Khung</b> và <b>Sinh viên</b> để xem dữ liệu.
           </div>
         ) : items.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-500">
-            Không có CLO chưa đạt.
-          </div>
+          <div className="px-4 py-6 text-sm text-slate-500">Không có CLO chưa đạt.</div>
         ) : (
           <div className="divide-y divide-slate-100">
             {items.map((r, idx) => (
