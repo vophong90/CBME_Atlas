@@ -1,38 +1,90 @@
 // lib/supabaseServer.ts
-import { cookies } from 'next/headers';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// ===== ENV helpers =====
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
 
-// SSR client: đọc/ghi cookie phiên người dùng (chuẩn, không cần tự parse tên cookie)
-export function getSupabase() {
+// Lấy projectRef từ NEXT_PUBLIC_SUPABASE_URL (vd: https://abcd1234.supabase.co → abcd1234)
+function getProjectRefFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname; // abcd1234.supabase.co
+    const parts = host.split('.');
+    return parts.length ? parts[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+// Đọc access token từ cookie Supabase (đúng tên cookie)
+function readAccessTokenFromCookies(): string | null {
   const store = cookies();
-  return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    cookies: {
-      get(name: string) { return store.get(name)?.value; },
-      set(name: string, value: string, options: CookieOptions) {
-        try { store.set({ name, value, ...options }); } catch {}
-      },
-      remove(name: string, options: CookieOptions) {
-        try { store.set({ name, value: '', ...options, expires: new Date(0) }); } catch {}
-      },
-    },
-  });
+  const supabaseUrl = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
+  const ref = getProjectRefFromUrl(supabaseUrl);
+
+  // 1) Tên cookie CHUẨN: sb-<projectRef>-auth-token  (value là JSON ["access","refresh"])
+  if (ref) {
+    const stdName = `sb-${ref}-auth-token`;
+    const v = store.get(stdName)?.value;
+    if (v) {
+      try {
+        const arr = JSON.parse(v);
+        if (Array.isArray(arr) && typeof arr[0] === 'string') return arr[0];
+      } catch {}
+    }
+  }
+
+  // 2) Giữ tương thích vài biến thể cũ:
+  const helpers = store.get('supabase-auth-token')?.value; // JSON ["access","refresh"]
+  if (helpers) {
+    try {
+      const arr = JSON.parse(helpers);
+      if (Array.isArray(arr) && typeof arr[0] === 'string') return arr[0];
+    } catch {}
+  }
+
+  const legacy = store.get('sb:token')?.value; // JSON { access_token, refresh_token }
+  if (legacy) {
+    try {
+      const obj = JSON.parse(legacy);
+      if (obj && typeof obj.access_token === 'string') return obj.access_token;
+    } catch {}
+  }
+
+  const veryOld = store.get('sb-access-token')?.value; // rất cũ
+  if (veryOld) return veryOld;
+
+  return null;
 }
 
-// Service client (server-only): bypass RLS
+// ===== Service role (bypass RLS) =====
 export function createServiceClient(): SupabaseClient {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
+  const serviceKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
+}
+
+// Singleton admin (tuỳ chọn)
+export const supabaseAdmin: SupabaseClient | undefined = (() => {
+  try { return createServiceClient(); } catch { return undefined; }
+})();
+
+// ===== Server client theo user hiện tại (RLS bật) =====
+export function getSupabase(): SupabaseClient {
+  const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
+  const anonKey = requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  const accessToken = readAccessTokenFromCookies();
+
+  return createClient(url, anonKey, {
     auth: { persistSession: false },
+    global: { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} },
   });
 }
 
-// Giữ tương thích ngược: instance admin
-export const supabaseAdmin: SupabaseClient = createClient(
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
-  { auth: { persistSession: false } }
-);
+// Alias để tương thích code cũ (nếu có nơi import createServerClient)
+export const createServerClient = getSupabase;
