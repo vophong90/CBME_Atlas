@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseFromRequest } from '@/lib/supabaseServer';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
@@ -8,21 +9,26 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const id = params.id?.trim();
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
   const { data, error } = await supabase
     .from('rubrics')
     .select('id,title,framework_id,course_code,definition,threshold')
-    .eq('id', params.id)
-    .single();
+    .eq('id', id)
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  const item = data ? {
-    id: data.id,
-    name: data.title,
-    definition: data.definition,
-    framework_id: data.framework_id,
-    course_code: data.course_code,
-    threshold: data.threshold,
-  } : null;
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  return NextResponse.json({ item });
+  return NextResponse.json({
+    item: {
+      id: data.id,
+      name: data.title,
+      definition: data.definition,
+      framework_id: data.framework_id,
+      course_code: data.course_code,
+      threshold: data.threshold,
+    }
+  });
 }
