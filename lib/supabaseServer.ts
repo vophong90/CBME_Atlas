@@ -36,20 +36,14 @@ export const supabaseAdmin: SupabaseClient | undefined = (() => {
 })();
 
 /* ----------------------- Server clients (RLS, có session) ------------------- */
-/**
- * Dùng trong Route Handlers (/app/api/**/route.ts).
- * Đọc session đúng chuẩn từ cookie (đã được refresh bởi middleware).
- */
+// Dùng trong Route Handlers (ví dụ: app/api/.../route.ts).
+// Đọc session từ cookie (cookie đã được refresh bởi middleware).
 export function getSupabaseFromRequest(): SupabaseClient {
   const cookieStore = cookies();
-  // Helpers tự lấy URL/KEY từ ENV: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
   return createRouteHandlerClient({ cookies: () => cookieStore }) as unknown as SupabaseClient;
 }
 
-/**
- * Dùng trong Server Components/Server Actions nếu cần.
- * Cũng đọc session từ cookie như trên.
- */
+// Dùng trong Server Components / Server Actions nếu cần.
 export function getSupabase(): SupabaseClient {
   const cookieStore = cookies();
   return createServerComponentClient({ cookies: () => cookieStore }) as unknown as SupabaseClient;
