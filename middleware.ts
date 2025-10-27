@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 
-type Role =
+type RoleCode =
   | 'admin'
   | 'edu_manager'
   | 'dept_lead'
@@ -11,70 +11,71 @@ type Role =
   | 'qa'
   | 'lecturer'
   | 'student'
-  | 'external_expert'
-  | 'support'
-  | 'viewer'
   | string;
 
-const ACCESS_MAP: Array<{ prefix: string; roles: 'any-auth' | Role[] }> = [
-  { prefix: '/admin',              roles: ['admin'] },
-  { prefix: '/academic-affairs',   roles: ['admin', 'edu_manager', 'dept_lead'] },
-  { prefix: '/teacher',            roles: ['admin', 'lecturer'] }, // yêu cầu đăng nhập
-  { prefix: '/department',         roles: ['admin', 'dept_secretary', 'dept_lead'] },
-  { prefix: '/quality-assurance',  roles: ['admin', 'qa', 'dept_lead'] },
-  { prefix: '/student',            roles: ['admin', 'student'] },  // yêu cầu đăng nhập
-  // /360-eval bỏ khỏi map để mở hoàn toàn
+const ACCESS: Array<{ prefix: string; allowed: RoleCode[] | 'any-auth' }> = [
+  { prefix: '/admin',             allowed: ['admin'] },
+  { prefix: '/academic-affairs',  allowed: ['admin', 'edu_manager', 'dept_lead'] },
+  { prefix: '/quality-assurance', allowed: ['admin', 'qa', 'dept_lead'] },
+  { prefix: '/department',        allowed: ['admin', 'dept_secretary', 'dept_lead'] },
+  { prefix: '/teacher',           allowed: ['admin', 'lecturer'] }, // cần đăng nhập
+  { prefix: '/student',           allowed: ['admin', 'student'] },  // cần đăng nhập
+  // /360-eval mở hoàn toàn -> KHÔNG đưa vào ACCESS
 ];
 
-const PUBLIC_PATHS = new Set<string>([
-  '/', '/login', '/error',
-  '/360-eval',               // mở hoàn toàn
-]);
+const PUBLIC_PATHS = new Set<string>(['/', '/login', '/error', '/360-eval']);
 
-function matchPrefix(path: string, prefix: string) {
+function matches(path: string, prefix: string) {
   return path === prefix || path.startsWith(prefix + '/');
 }
 
 export async function middleware(req: NextRequest) {
-  const url = req.nextUrl;
-  const path = url.pathname;
+  const { pathname, search } = req.nextUrl;
 
-  if (
-    path.startsWith('/_next') ||
-    path.startsWith('/assets') ||
-    path.startsWith('/favicon') ||
-    path.startsWith('/api')      // API bảo vệ bằng RLS/handler
-  ) {
+  // Static/API bypass
+  if (pathname.startsWith('/_next') || pathname.startsWith('/assets') || pathname.startsWith('/favicon') || pathname.startsWith('/api'))
+    return NextResponse.next();
+
+  // /360-eval (và mọi route con) là public
+  if (pathname === '/360-eval' || pathname.startsWith('/360-eval/')) {
     return NextResponse.next();
   }
 
-  if (PUBLIC_PATHS.has(path) || path.startsWith('/360-eval')) {
-    // mọi route con của /360-eval cũng public
-    return NextResponse.next();
-  }
+  // Trang public khác
+  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
 
+  // Route có bảo vệ?
+  const rule = ACCESS.find(r => matches(pathname, r.prefix));
+  if (!rule) return NextResponse.next();
+
+  // Lấy session
   const res = NextResponse.next();
   const supabase = createMiddlewareClient({ req, res });
   const { data: { session } } = await supabase.auth.getSession();
 
-  const rule = ACCESS_MAP.find(r => matchPrefix(path, r.prefix));
-  if (!rule) return res;
-
   if (!session) {
     const login = new URL('/login', req.url);
-    login.searchParams.set('next', path + (url.search || ''));
+    login.searchParams.set('next', pathname + (search || ''));
     return NextResponse.redirect(login);
   }
 
-  if (rule.roles === 'any-auth') return res;
+  if (rule.allowed === 'any-auth') return res;
 
-  const uid = session.user.id;
-  const { data: prof } = await supabase.from('profiles').select('role').eq('id', uid).single();
-  const role: Role = (prof?.role as Role) ?? 'viewer';
+  // Lấy role codes của user từ user_roles -> roles
+  const { data: rows, error } = await supabase
+    .from('user_roles')
+    .select('roles:role_id ( code )'); // join FK role_id -> roles.id
 
-  if (role === 'admin') return res;
+  // Trong RLS, user chỉ thấy role của chính mình; admin có thể thấy tất
+  const codes = (rows || [])
+    .map((r: any) => r.roles?.code as string)
+    .filter(Boolean);
 
-  const allowed = (rule.roles as Role[]).includes(role);
+  // admin => qua hết
+  if (codes.includes('admin')) return res;
+
+  // Kiểm tra quyền
+  const allowed = codes.some(c => (rule.allowed as RoleCode[]).includes(c));
   if (!allowed) {
     const home = new URL('/', req.url);
     home.searchParams.set('denied', '1');
