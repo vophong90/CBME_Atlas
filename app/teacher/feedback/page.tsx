@@ -1,77 +1,94 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-type Framework = { id: string; doi_tuong: string; chuyen_nganh: string; nien_khoa: string };
+type Framework = { id: string; label: string }; // khớp /api/frameworks
 type Student = {
   id: string;
   user_id: string | null;
   mssv?: string | null;
   student_code?: string | null;
   full_name?: string | null;
-  cohort?: string | null;     // có thể null (tuỳ schema)
-  class_name?: string | null; // có thể null (tuỳ schema)
+  label?: string; // khớp /api/teacher/students
 };
 
 export default function TeacherFeedbackPage() {
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [frameworkId, setFrameworkId] = useState<string>('');
 
+  // combobox SV
+  const [openBox, setOpenBox] = useState(false);
   const [q, setQ] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
-  const [courseCode, setCourseCode] = useState('');
-  const [cloIds, setCloIds] = useState('');
-
+  // nội dung & moderation
   const [message, setMessage] = useState('');
   const [moderationPass, setModerationPass] = useState<boolean | null>(null);
 
+  // loading flags
   const [loadingFw, setLoadingFw] = useState(false);
   const [loadingFind, setLoadingFind] = useState(false);
   const [loadingModerate, setLoadingModerate] = useState(false);
   const [loadingSend, setLoadingSend] = useState(false);
 
-  // Tải danh sách khung CT
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (!boxRef.current) return;
+      if (!boxRef.current.contains(e.target as Node)) setOpenBox(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  // Tải danh sách khung chương trình (dùng /api/frameworks: [{id,label}])
   useEffect(() => {
     (async () => {
       try {
         setLoadingFw(true);
         const r = await fetch('/api/frameworks');
         const d = await r.json();
-        if (r.ok) {
-          setFrameworks(d.items || []);
-          if ((d.items || []).length && !frameworkId) setFrameworkId(d.items[0].id);
-        } else {
-          alert(d.error || 'Không tải được khung chương trình');
-        }
+        if (!r.ok) throw new Error(d?.error || 'Không tải được khung chương trình');
+        setFrameworks(d.items || []);
+        if ((d.items || []).length && !frameworkId) setFrameworkId(d.items[0].id);
+      } catch (e: any) {
+        alert(e?.message || 'Không tải được khung chương trình');
       } finally {
         setLoadingFw(false);
       }
     })();
-  }, []); // init
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Tìm SV theo khung + q
-  async function searchStudents() {
-    setSelectedStudent(null);
-    setModerationPass(null);
-    try {
-      setLoadingFind(true);
-      const url = new URL('/api/teacher/students', window.location.origin);
-      if (frameworkId) url.searchParams.set('framework_id', frameworkId);
-      if (q.trim()) url.searchParams.set('q', q.trim());
-      const r = await fetch(url.toString());
-      const d = await r.json();
-      if (!r.ok) {
-        alert(d.error || 'Không tìm được sinh viên');
+  // Debounce tìm SV
+  useEffect(() => {
+    if (!frameworkId) return;
+    const timer = setTimeout(async () => {
+      try {
+        setLoadingFind(true);
+        const url = new URL('/api/teacher/students', window.location.origin);
+        url.searchParams.set('framework_id', frameworkId);
+        if (q.trim()) url.searchParams.set('q', q.trim());
+        const r = await fetch(url.toString());
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.error || 'Không tìm được sinh viên');
+        setStudents(d.items || []);
+      } catch (e: any) {
         setStudents([]);
-        return;
+      } finally {
+        setLoadingFind(false);
       }
-      setStudents(d.items || []);
-    } finally {
-      setLoadingFind(false);
-    }
-  }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [frameworkId, q]);
+
+  // Đổi khung → reset SV & moderation
+  useEffect(() => {
+    setSelectedStudent(null);
+    setQ('');
+    setModerationPass(null);
+  }, [frameworkId]);
 
   // Kiểm duyệt bằng GPT (model 5) — nếu OK mới bật nút Gửi
   async function moderate() {
@@ -102,8 +119,6 @@ export default function TeacherFeedbackPage() {
       const payload = {
         student_user_id: selectedStudent.user_id,
         message,
-        course_code: courseCode || null,
-        clo_ids: cloIds ? cloIds.split(',').map(s => s.trim()).filter(Boolean) : null,
       };
       const r = await fetch('/api/teacher/feedback', {
         method: 'POST',
@@ -116,7 +131,6 @@ export default function TeacherFeedbackPage() {
         return;
       }
       alert('Đã gửi phản hồi cho SV (vào hộp thư của SV).');
-      // reset message + trạng thái duyệt
       setMessage('');
       setModerationPass(null);
     } finally {
@@ -131,114 +145,87 @@ export default function TeacherFeedbackPage() {
 
   return (
     <section className="space-y-5">
-      {/* Khung chương trình */}
+      {/* 1) Chọn khung chương trình */}
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Khung chương trình</label>
-            <select
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              value={frameworkId}
-              onChange={e => { setFrameworkId(e.target.value); setStudents([]); setSelectedStudent(null); setModerationPass(null); }}
-              disabled={loadingFw}
-            >
-              {frameworks.map(f => (
-                <option key={f.id} value={f.id}>
-                  {`${f.doi_tuong} • ${f.chuyen_nganh} • NK ${f.nien_khoa}`}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <label className="block text-sm font-medium mb-1">Khung chương trình</label>
+        <select
+          className="w-full rounded-xl border border-slate-300 px-3 py-2"
+          value={frameworkId}
+          onChange={e => setFrameworkId(e.target.value)}
+          disabled={loadingFw}
+        >
+          {frameworks.map(f => (
+            <option key={f.id} value={f.id}>{f.label}</option>
+          ))}
+        </select>
       </div>
 
-      {/* Tìm & chọn Sinh viên */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
-        <div className="grid md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Tìm sinh viên (MSSV / Họ tên)</label>
-            <div className="flex gap-2">
-              <input
-                className="rounded-xl border border-slate-300 px-3 py-2 flex-1"
-                value={q}
-                onChange={e=>setQ(e.target.value)}
-                placeholder="VD: 2212345 hoặc Nguyễn Văn A"
-              />
-              <button
-                className="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50"
-                onClick={searchStudents}
-                disabled={loadingFind}
-              >
-                {loadingFind ? 'Đang tìm…' : 'Tìm'}
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Mã học phần (tuỳ chọn)</label>
-            <input
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              placeholder="VD: IMMU101"
-              value={courseCode}
-              onChange={e=>setCourseCode(e.target.value)}
-            />
-          </div>
-        </div>
+      {/* 2) Chọn sinh viên (combobox — 1 menu có ô gõ để tìm) */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm" ref={boxRef}>
+        <label className="block text-sm font-medium mb-1">Sinh viên</label>
 
-        {/* Kết quả + chọn SV */}
-        <div className="max-h-64 overflow-auto rounded-xl border border-slate-200">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr>
-                <th className="text-left p-2">MSSV</th>
-                <th className="text-left p-2">Họ tên</th>
-                <th className="text-left p-2">User</th>
-                <th className="text-left p-2">Chọn</th>
-              </tr>
-            </thead>
-            <tbody>
-              {students.map(s => (
-                <tr key={s.id} className={selectedStudent?.id === s.id ? 'bg-emerald-50' : ''}>
-                  <td className="p-2">{s.mssv || s.student_code || '—'}</td>
-                  <td className="p-2">{s.full_name || '—'}</td>
-                  <td className="p-2">{s.user_id ? 'Đã liên kết' : <span className="text-red-600">Chưa có</span>}</td>
-                  <td className="p-2">
-                    <button
-                      className="px-2 py-1 rounded-lg border hover:bg-slate-50"
-                      onClick={() => { setSelectedStudent(s); setModerationPass(null); }}
-                    >
-                      Chọn
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {students.length === 0 && (
-                <tr><td className="p-3 text-slate-500" colSpan={4}>Nhập từ khoá rồi bấm “Tìm” để hiển thị danh sách.</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div className="relative">
+          {/* Ô hiển thị + mở menu */}
+          <button
+            type="button"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-left flex items-center justify-between"
+            onClick={() => setOpenBox(v => !v)}
+            disabled={!frameworkId}
+          >
+            <span>
+              {selectedStudent
+                ? `${selectedStudent.mssv ?? selectedStudent.student_code ?? '—'} — ${selectedStudent.full_name ?? '—'}`
+                : (frameworkId ? 'Chọn sinh viên…' : 'Chọn khung trước')}
+            </span>
+            <span className="text-slate-500">▾</span>
+          </button>
+
+          {/* Panel dropdown */}
+          {openBox && (
+            <div className="absolute z-10 mt-2 w-full rounded-xl border border-slate-200 bg-white shadow-lg">
+              <div className="p-2 border-b bg-slate-50">
+                <input
+                  autoFocus
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="Gõ MSSV hoặc họ tên để lọc…"
+                  value={q}
+                  onChange={e => setQ(e.target.value)}
+                />
+              </div>
+              <div className="max-h-72 overflow-auto">
+                {loadingFind && <div className="p-3 text-sm text-slate-500">Đang tải…</div>}
+                {!loadingFind && students.length === 0 && (
+                  <div className="p-3 text-sm text-slate-500">Không có kết quả</div>
+                )}
+                <ul className="py-1">
+                  {students.map(s => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        className={[
+                          'w-full px-3 py-2 text-left text-sm hover:bg-slate-50',
+                          selectedStudent?.id === s.id ? 'bg-emerald-50' : ''
+                        ].join(' ')}
+                        onClick={() => { setSelectedStudent(s); setOpenBox(false); setModerationPass(null); }}
+                      >
+                        {(s.mssv ?? s.student_code ?? '—') + ' — ' + (s.full_name ?? '—')}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
 
         {selectedStudent && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm">
-            <div><b>{selectedStudent.full_name || 'Sinh viên'}</b> • MSSV: {selectedStudent.mssv || selectedStudent.student_code || '—'}</div>
-            <div className="text-slate-500">User liên kết: {selectedStudent.user_id ? 'Có' : 'Chưa có'}</div>
+          <div className="mt-3 text-sm text-slate-600">
+            User liên kết: {selectedStudent.user_id ? 'Có' : <span className="text-red-600">Chưa có</span>}
           </div>
         )}
-
-        <div className="grid md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">CLO liên quan (tuỳ chọn)</label>
-            <input
-              className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              placeholder="Nhập mã CLO, cách nhau dấu phẩy"
-              value={cloIds}
-              onChange={e=>setCloIds(e.target.value)}
-            />
-          </div>
-        </div>
       </div>
 
-      {/* Soạn & kiểm duyệt & gửi */}
+      {/* 3) Soạn & kiểm duyệt & gửi */}
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
         <label className="block text-sm font-medium mb-1">Nội dung góp ý</label>
         <textarea
