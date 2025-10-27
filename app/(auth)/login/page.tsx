@@ -2,17 +2,34 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
 
 /* Inline icons (no deps) */
-const Eye = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>);
-const EyeOff = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 104.24 4.24"/><path d="M9.88 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a17.22 17.22 0 01-3.84 4.66M6.11 6.11A17.86 17.86 0 001 12s4 8 11 8a10.94 10.94 0 005.06-1.22"/></svg>);
-const Mail = (p: any) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg>);
+const Eye = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const EyeOff = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 10.6a3 3 0 104.24 4.24" />
+    <path d="M9.88 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a17.22 17.22 0 01-3.84 4.66M6.11 6.11A17.86 17.86 0 001 12s4 8 11 8a10.94 10.94 0 005.06-1.22" />
+  </svg>
+);
+const Mail = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M4 4h16v16H4z" />
+    <path d="M22 6l-10 7L2 6" />
+  </svg>
+);
 
 export default function LoginPage() {
   const supabase = getSupabase();
   const router = useRouter();
+  const search = useSearchParams();
 
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
@@ -22,20 +39,38 @@ export default function LoginPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // Lấy next url nếu có, mặc định '/'
+  const nextUrl = search?.get('next') || '/';
+
+  // Nếu đã có session, tự chuyển về nextUrl (tránh kẹt ở trang login)
   useEffect(() => {
+    let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace('/');
+      if (!mounted) return;
+      if (data?.session) {
+        router.replace(nextUrl);
+      }
     });
-  }, [router, supabase]);
+    return () => {
+      mounted = false;
+    };
+  }, [router, supabase, nextUrl]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setNotice(null);
     setLoading(true);
     try {
+      // (Tuỳ chọn) nếu bạn muốn điều khiển "remember me" theo localStorage/cookie tự bạn,
+      // có thể ghi một flag vào localStorage ở đây. Supabase-js v2 tự persist session.
+      // if (!remember) localStorage.setItem('cbme_ephemeral', '1');
+
       const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
       if (error) throw error;
-      router.replace('/');
+
+      // Sau đăng nhập → quay lại trang ban đầu muốn vào (next) hoặc '/'
+      router.replace(nextUrl);
     } catch (e: any) {
       setErr(e?.message ?? 'Đăng nhập thất bại');
     } finally {
@@ -46,7 +81,10 @@ export default function LoginPage() {
   async function onForgot() {
     setErr(null);
     setNotice(null);
-    if (!email) { setErr('Nhập email để nhận liên kết đặt lại mật khẩu.'); return; }
+    if (!email) {
+      setErr('Nhập email để nhận liên kết đặt lại mật khẩu.');
+      return;
+    }
     try {
       setLoading(true);
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -71,8 +109,8 @@ export default function LoginPage() {
             Đăng nhập để quản lý chương trình, khảo sát chất lượng, và theo dõi kết quả theo thời gian thực.
           </p>
           <ul className="mt-6 space-y-2 text-sm text-white/80">
-            <li>• Single workspace cho giảng viên & QA</li>
-            <li>• Báo cáo trực quan & xuất dữ liệu</li>
+            <li>• Single workspace cho giảng viên &amp; QA</li>
+            <li>• Báo cáo trực quan &amp; xuất dữ liệu</li>
             <li>• Bảo mật theo vai trò (RBAC)</li>
           </ul>
         </div>
@@ -98,6 +136,7 @@ export default function LoginPage() {
                   required
                   className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
                   placeholder="you@university.edu"
+                  autoComplete="username"
                 />
                 <Mail className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
               </div>
@@ -113,6 +152,7 @@ export default function LoginPage() {
                   required
                   className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
                   placeholder="••••••••"
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
@@ -127,7 +167,12 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" className="h-4 w-4" checked={remember} onChange={(e)=>setRemember(e.target.checked)} />
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
                 Ghi nhớ đăng nhập
               </label>
               <button type="button" onClick={onForgot} className="text-sm text-brand-700 hover:text-brand-800 underline">
@@ -136,10 +181,14 @@ export default function LoginPage() {
             </div>
 
             {err && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {err}
+              </div>
             )}
             {notice && (
-              <div className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-700">{notice}</div>
+              <div className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-700">
+                {notice}
+              </div>
             )}
 
             <button
@@ -156,7 +205,9 @@ export default function LoginPage() {
           </div>
 
           <div className="mt-6 text-center">
-            <Link className="text-xs text-slate-500 underline" href="/">← Về Trang chủ</Link>
+            <Link className="text-xs text-slate-500 underline" href="/">
+              ← Về Trang chủ
+            </Link>
           </div>
         </div>
       </div>
