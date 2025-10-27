@@ -13,67 +13,62 @@ type RoleCode =
   | 'student'
   | string;
 
-const ACCESS: Array<{ prefix: string; allowed: RoleCode[] | 'any-auth' }> = [
+// Route → role được phép
+const ACCESS: Array<{ prefix: string; allowed: RoleCode[] }> = [
   { prefix: '/admin',             allowed: ['admin'] },
   { prefix: '/academic-affairs',  allowed: ['admin', 'edu_manager', 'dept_lead'] },
   { prefix: '/quality-assurance', allowed: ['admin', 'qa', 'dept_lead'] },
   { prefix: '/department',        allowed: ['admin', 'dept_secretary', 'dept_lead'] },
   { prefix: '/teacher',           allowed: ['admin', 'lecturer'] },
   { prefix: '/student',           allowed: ['admin', 'student'] },
-  // /360-eval: mở hoàn toàn (không đưa vào ACCESS)
+  // /360-eval mở hoàn toàn → không đưa vào ACCESS
 ];
 
+// Các đường dẫn public (không yêu cầu đăng nhập)
 const PUBLIC_PATHS = new Set<string>(['/', '/login', '/error', '/360-eval']);
 
 function matches(path: string, prefix: string) {
   return path === prefix || path.startsWith(prefix + '/');
 }
 
-async function getRoleCodes(supabase: ReturnType<typeof createMiddlewareClient>): Promise<string[]> {
-  // ƯU TIÊN: gọi RPC nếu đã tạo public.fn_my_role_codes() (security definer)
-  //   create or replace function public.fn_my_role_codes() returns text[] ...
+async function getRoleCodes(
+  supabase: ReturnType<typeof createMiddlewareClient>
+): Promise<string[]> {
+  // 1) Thử RPC nếu có: public.fn_my_role_codes() → text[]
   try {
-    const { data, error } = await (supabase as any).rpc('fn_my_role_codes');
+    // @ts-expect-error rpc có sẵn trên client
+    const { data, error } = await supabase.rpc('fn_my_role_codes');
     if (!error && Array.isArray(data)) return data as string[];
-  } catch { /* ignore and fallback */ }
+  } catch {
+    // ignore & fallback
+  }
 
-  // FALLBACK: đọc trực tiếp user_roles -> roles (RLS phải cho user xem role của mình)
+  // 2) Fallback chắc chắn chạy: lấy role_id từ user_roles → tra roles.id → code
   try {
-    const { data: rows, error } = await supabase
-      .from('user_roles')
-      .select('role_id, roles:roles ( code )');
-
-    if (!error && rows?.length) {
-      return rows
-        .map((r: any) => r?.roles?.code as string)
-        .filter(Boolean);
-    }
-  } catch { /* ignore */ }
-
-  // FALLBACK 2: đọc role_id rồi query roles (ít khi cần, nhưng cho chắc)
-  try {
-    const { data: urs } = await supabase
+    const { data: urs, error: e1 } = await supabase
       .from('user_roles')
       .select('role_id');
+    if (e1 || !urs?.length) return [];
 
-    const roleIds = (urs || []).map((u: any) => u.role_id).filter(Boolean);
+    const roleIds = urs.map((u: any) => u.role_id).filter(Boolean);
     if (!roleIds.length) return [];
 
-    const { data: roles } = await supabase
+    const { data: roles, error: e2 } = await supabase
       .from('roles')
       .select('id, code')
       .in('id', roleIds);
+    if (e2 || !roles?.length) return [];
 
-    return (roles || []).map((r: any) => r.code as string).filter(Boolean);
-  } catch { /* ignore */ }
-
-  return [];
+    return roles.map((r: any) => r.code as string).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Bỏ qua static & API
+  // Bỏ qua static & API (API bảo vệ bằng RLS/handler)
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/assets') ||
@@ -83,46 +78,45 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // /360-eval và các route con: mở hoàn toàn
+  // /360-eval (và route con) là public hoàn toàn
   if (pathname === '/360-eval' || pathname.startsWith('/360-eval/')) {
     return NextResponse.next();
   }
 
-  // Public khác
+  // Trang public khác
   if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next();
   }
 
-  // Kiểm tra rule cho route
+  // Có rule bảo vệ cho route này không?
   const rule = ACCESS.find((r) => matches(pathname, r.prefix));
   if (!rule) return NextResponse.next();
 
-  // Chuẩn bị Supabase client (để refresh cookie nếu cần)
+  // Dùng supabase middleware client để giữ phiên & cookies
   const res = NextResponse.next();
   const supabase = createMiddlewareClient({ req, res });
 
-  // Đòi hỏi đăng nhập cho các route trong ACCESS
-  const { data: { session } } = await supabase.auth.getSession();
+  // Bắt buộc phải đăng nhập
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
   if (!session) {
     const login = new URL('/login', req.url);
     login.searchParams.set('next', pathname + (search || ''));
     return NextResponse.redirect(login);
   }
 
-  if (rule.allowed === 'any-auth') {
-    return res;
-  }
-
-  // Lấy role-codes của user
+  // Lấy các role code của user hiện tại
   const codes = await getRoleCodes(supabase);
 
-  // admin qua tất cả
+  // admin → qua tất cả
   if (codes.includes('admin')) {
     return res;
   }
 
-  // Kiểm tra quyền
-  const allowed = codes.some((c) => (rule.allowed as RoleCode[]).includes(c));
+  // Kiểm tra quyền theo rule
+  const allowed = codes.some((c) => rule.allowed.includes(c as RoleCode));
   if (!allowed) {
     const home = new URL('/', req.url);
     home.searchParams.set('denied', '1');
