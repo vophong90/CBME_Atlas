@@ -91,7 +91,7 @@ export async function middleware(req: NextRequest) {
   const rule = ACCESS.find((r) => matches(pathname, r.prefix));
   if (!rule) return NextResponse.next();
 
-  // Dùng supabase middleware client để giữ phiên & cookies
+  // Tạo response "gốc" để Supabase có thể refresh cookie
   const res = NextResponse.next();
   const supabase = createMiddlewareClient({ req, res });
 
@@ -101,9 +101,14 @@ export async function middleware(req: NextRequest) {
   } = await supabase.auth.getSession();
 
   if (!session) {
-    const login = new URL('/login', req.url);
-    login.searchParams.set('next', pathname + (search || ''));
-    return NextResponse.redirect(login);
+    const loginUrl = new URL('/login', req.url);
+    loginUrl.searchParams.set('next', pathname + (search || ''));
+
+    // VERY IMPORTANT: chuyển tiếp Set-Cookie từ `res` của Supabase
+    const redirect = NextResponse.redirect(loginUrl);
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) redirect.headers.set('set-cookie', setCookie);
+    return redirect;
   }
 
   // Lấy các role code của user hiện tại
@@ -119,9 +124,16 @@ export async function middleware(req: NextRequest) {
   if (!allowed) {
     const home = new URL('/', req.url);
     home.searchParams.set('denied', '1');
-    return NextResponse.redirect(home);
+    home.searchParams.set('reason', codes.length ? 'not-allowed' : 'no-roles');
+
+    // IMPORTANT: chuyển tiếp Set-Cookie từ Supabase
+    const redirect = NextResponse.redirect(home);
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) redirect.headers.set('set-cookie', setCookie);
+    return redirect;
   }
 
+  // Hợp lệ → cho qua và giữ cookie state
   return res;
 }
 
