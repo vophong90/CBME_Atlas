@@ -39,7 +39,7 @@ export default function TopNav() {
             className="rounded-md"
             priority
           />
-          <span className="font-semibold">Năng Lực Y</span>
+          <span className="font-semibold">CBME Atlas</span>
         </Link>
 
         {/* Links */}
