@@ -79,7 +79,7 @@ export default function HomePage() {
               <h1 className="text-3xl md:text-4xl font-bold leading-tight">
                 KHOA Y HỌC CỔ TRUYỀN
                 <br />
-                <span className="text-[#0E7BD0] text-[0.9em] font-semibold tracking-tight">
+                <span className="text-[#0E7BD0] text-[0.9em] font-semibold tracking-tight whitespace-nowrap">
                   ĐẠI HỌC Y DƯỢC THÀNH PHỐ HỒ CHÍ MINH
                 </span>
               </h1>
