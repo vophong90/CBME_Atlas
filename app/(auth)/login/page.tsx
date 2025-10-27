@@ -39,22 +39,26 @@ export default function LoginPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Lấy next url nếu có, mặc định '/'
+  // Trang đích sau đăng nhập (mặc định '/')
   const nextUrl = search?.get('next') || '/';
 
-  // Nếu đã có session, tự chuyển về nextUrl (tránh kẹt ở trang login)
+  // Nếu đã có session, tự chuyển đến nextUrl để tránh mắc kẹt ở /login
   useEffect(() => {
     let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      if (data?.session) {
-        router.replace(nextUrl);
-      }
+      if (data?.session) router.replace(nextUrl);
     });
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [router, supabase, nextUrl]);
+
+  // QUAN TRỌNG: lắng nghe thay đổi auth để SSR/middleware “nhìn thấy” cookie mới
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      router.refresh(); // kích hoạt refresh tree -> cookie sync cho server/middleware
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase, router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -62,14 +66,11 @@ export default function LoginPage() {
     setNotice(null);
     setLoading(true);
     try {
-      // (Tuỳ chọn) nếu bạn muốn điều khiển "remember me" theo localStorage/cookie tự bạn,
-      // có thể ghi một flag vào localStorage ở đây. Supabase-js v2 tự persist session.
-      // if (!remember) localStorage.setItem('cbme_ephemeral', '1');
-
+      // Supabase-js v2 tự persist session; "remember" bạn có thể dùng để set flag riêng nếu muốn
       const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
       if (error) throw error;
 
-      // Sau đăng nhập → quay lại trang ban đầu muốn vào (next) hoặc '/'
+      // Đăng nhập xong quay về trang ban đầu muốn vào
       router.replace(nextUrl);
     } catch (e: any) {
       setErr(e?.message ?? 'Đăng nhập thất bại');
@@ -81,10 +82,7 @@ export default function LoginPage() {
   async function onForgot() {
     setErr(null);
     setNotice(null);
-    if (!email) {
-      setErr('Nhập email để nhận liên kết đặt lại mật khẩu.');
-      return;
-    }
+    if (!email) { setErr('Nhập email để nhận liên kết đặt lại mật khẩu.'); return; }
     try {
       setLoading(true);
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
