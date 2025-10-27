@@ -17,18 +17,16 @@ export default function TeacherInboxPage() {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'unread' | 'read' | 'archived' | ''>('unread');
-  const [courseCode, setCourseCode] = useState('');
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<InboxItem | null>(null);
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
     if (status) p.set('status', status);
-    if (courseCode) p.set('course_code', courseCode);
     if (q) p.set('q', q);
     p.set('limit', '100');
     return p.toString();
-  }, [status, courseCode, q]);
+  }, [status, q]);
 
   async function fetchItems() {
     setLoading(true);
@@ -37,8 +35,7 @@ export default function TeacherInboxPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Fetch error');
       setItems(data.items || []);
-      if (data.items?.length) setSelected(data.items[0]);
-      else setSelected(null);
+      setSelected(data.items?.[0] ?? null);
     } catch (e) {
       console.error(e);
       setItems([]); setSelected(null);
@@ -74,15 +71,14 @@ export default function TeacherInboxPage() {
           </button>
         </div>
 
-        {/* Filters */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+        {/* Filters (đã bỏ lọc học phần) */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <select className="rounded-xl border border-slate-300 px-3 py-2" value={status} onChange={(e) => setStatus(e.target.value as any)}>
             <option value="">Tất cả trạng thái</option>
             <option value="unread">Chưa đọc</option>
             <option value="read">Đã đọc</option>
             <option value="archived">Lưu trữ</option>
           </select>
-          <input className="rounded-xl border border-slate-300 px-3 py-2" placeholder="Lọc theo mã học phần (VD: TM101)" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} />
           <input className="rounded-xl border border-slate-300 px-3 py-2" placeholder="Tìm kiếm nội dung" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="hidden md:block" />
         </div>
@@ -125,6 +121,7 @@ export default function TeacherInboxPage() {
                   </div>
                   <div className="mt-2 text-sm line-clamp-2">{it.message}</div>
                   <div className="mt-2 flex gap-2 flex-wrap">
+                    {/* vẫn hiển thị nếu có, nhưng không còn filter theo học phần */}
                     {it.course_code && <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full border">{it.course_code}</span>}
                     {it.clo_ids?.length ? <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full border">CLOs({it.clo_ids.length})</span> : null}
                     {it.is_flagged && <span className="text-xs bg-red-100 px-2 py-0.5 rounded-full border border-red-300">Flagged</span>}
