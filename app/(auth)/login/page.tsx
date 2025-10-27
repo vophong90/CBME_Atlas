@@ -34,15 +34,16 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(true); // hiện chưa dùng để đổi thời hạn cookie
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Trang đích sau đăng nhập (mặc định '/')
-  const nextUrl = search?.get('next') || '/';
+  // Lấy & "khử độc" next URL (chỉ cho phép path nội bộ)
+  const rawNext = search?.get('next') || '/';
+  const nextUrl = rawNext.startsWith('/') ? rawNext : '/';
 
-  // Nếu đã có session, tự chuyển đến nextUrl để tránh mắc kẹt ở /login
+  // Nếu đã có session -> đi thẳng tới next (tránh kẹt /login)
   useEffect(() => {
     let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
@@ -50,12 +51,12 @@ export default function LoginPage() {
       if (data?.session) router.replace(nextUrl);
     });
     return () => { mounted = false; };
-  }, [router, supabase, nextUrl]);
+  }, [supabase, router, nextUrl]);
 
-  // QUAN TRỌNG: lắng nghe thay đổi auth để SSR/middleware “nhìn thấy” cookie mới
+  // QUAN TRỌNG: đồng bộ cookie cho SSR/middleware ngay khi trạng thái auth đổi
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      router.refresh(); // kích hoạt refresh tree -> cookie sync cho server/middleware
+      router.refresh();
     });
     return () => subscription.unsubscribe();
   }, [supabase, router]);
@@ -66,11 +67,8 @@ export default function LoginPage() {
     setNotice(null);
     setLoading(true);
     try {
-      // Supabase-js v2 tự persist session; "remember" bạn có thể dùng để set flag riêng nếu muốn
       const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
       if (error) throw error;
-
-      // Đăng nhập xong quay về trang ban đầu muốn vào
       router.replace(nextUrl);
     } catch (e: any) {
       setErr(e?.message ?? 'Đăng nhập thất bại');
@@ -128,13 +126,15 @@ export default function LoginPage() {
               <label className="text-sm font-medium">Email</label>
               <div className="mt-1 relative">
                 <input
+                  name="email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
-                  placeholder="you@university.edu"
                   autoComplete="username"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300 disabled:opacity-70"
+                  placeholder="you@university.edu"
                 />
                 <Mail className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
               </div>
@@ -144,13 +144,15 @@ export default function LoginPage() {
               <label className="text-sm font-medium">Mật khẩu</label>
               <div className="mt-1 relative">
                 <input
+                  name="password"
                   type={showPw ? 'text' : 'password'}
                   value={pw}
                   onChange={(e) => setPw(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
-                  placeholder="••••••••"
                   autoComplete="current-password"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300 disabled:opacity-70"
+                  placeholder="••••••••"
                 />
                 <button
                   type="button"
@@ -170,10 +172,16 @@ export default function LoginPage() {
                   className="h-4 w-4"
                   checked={remember}
                   onChange={(e) => setRemember(e.target.checked)}
+                  disabled={loading}
                 />
                 Ghi nhớ đăng nhập
               </label>
-              <button type="button" onClick={onForgot} className="text-sm text-brand-700 hover:text-brand-800 underline">
+              <button
+                type="button"
+                onClick={onForgot}
+                disabled={loading}
+                className="text-sm text-brand-700 hover:text-brand-800 underline disabled:opacity-60"
+              >
                 Quên mật khẩu?
               </button>
             </div>
@@ -192,6 +200,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
+              aria-busy={loading}
               className="w-full rounded-xl bg-brand-600 px-3 py-2 text-white hover:bg-brand-700 active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? 'Đang xử lý...' : 'Đăng nhập'}
