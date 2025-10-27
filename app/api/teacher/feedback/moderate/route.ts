@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // YÊU CẦU: model 5
-      body: JSON.stringify({ prompt, model: 5 }),
+      body: JSON.stringify({ prompt}),
       signal: controller.signal,
     });
 
