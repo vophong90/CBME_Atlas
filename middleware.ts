@@ -34,10 +34,9 @@ function matches(path: string, prefix: string) {
 async function getRoleCodes(
   supabase: ReturnType<typeof createMiddlewareClient>
 ): Promise<string[]> {
-  // 1) Thử RPC nếu có: public.fn_my_role_codes() → text[]
+  // 1) Thử RPC nếu đã tạo public.fn_my_role_codes() → text[]
   try {
-    // @ts-expect-error rpc có sẵn trên client
-    const { data, error } = await supabase.rpc('fn_my_role_codes');
+    const { data, error } = await (supabase as any).rpc('fn_my_role_codes');
     if (!error && Array.isArray(data)) return data as string[];
   } catch {
     // ignore & fallback
