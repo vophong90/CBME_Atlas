@@ -1,13 +1,11 @@
 // app/api/teacher/inbox/[id]/route.ts
 import { NextResponse } from 'next/server';
-import { getSupabase } from '@/lib/getSupabaseServer'; // ĐỔI path này cho khớp helper của bạn
+import { getSupabase } from '@/lib/getSupabaseServer';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const supabase = await getSupabase();
   const { data: { user }, error: uerr } = await supabase.auth.getUser();
   if (uerr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -33,7 +31,7 @@ export async function PATCH(
     .from('teacher_inbox')
     .update(payload)
     .eq('id', id)
-    .eq('teacher_id', user.id) // bảo đảm chỉ update hộp thư của chính mình
+    .eq('teacher_id', user.id)
     .select()
     .single();
 
