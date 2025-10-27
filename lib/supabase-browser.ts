@@ -1,29 +1,15 @@
 'use client';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+// import type { Database } from '@/types/supabase'; // nếu bạn có types
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+let _client: ReturnType<typeof createClientComponentClient> | null = null;
 
-let _client: SupabaseClient | null = null;
-
-/** Supabase client chạy ở BROWSER (giữ phiên đăng nhập) */
-export function supabaseBrowser(): SupabaseClient {
+/** Supabase client CHẠY TRÊN BROWSER, đồng bộ cookie cho SSR/middleware */
+export function getSupabase() {
   if (_client) return _client;
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) {
-    throw new Error('Thiếu biến môi trường Supabase (URL/ANON_KEY). Kiểm tra ENV.');
-  }
-
-  _client = createClient(url, key, {
-    auth: {
-      persistSession: true,    // giữ phiên trong localStorage
-      autoRefreshToken: true,  // tự làm mới token
-      detectSessionInUrl: true
-    },
-  });
-
+  _client = createClientComponentClient(/*<Database>*/);
   return _client;
 }
 
-/** Back-compat cho code cũ: getSupabase() */
-export const getSupabase = supabaseBrowser;
+/** Alias tương thích tên cũ (nếu có nơi gọi supabaseBrowser) */
+export const supabaseBrowser = getSupabase;
