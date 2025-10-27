@@ -31,10 +31,37 @@ function matches(path: string, prefix: string) {
   return path === prefix || path.startsWith(prefix + '/');
 }
 
+function unique<T>(arr: T[]): T[] {
+  return Array.from(new Set(arr));
+}
+
+function readRolesFromSessionMeta(session: any): string[] {
+  const codes: string[] = [];
+  const user = session?.user;
+  const um = user?.user_metadata ?? {};
+  const am = user?.app_metadata ?? {};
+  // chấp nhận cả string lẫn array
+  const pushMaybe = (v: unknown) => {
+    if (!v) return;
+    if (Array.isArray(v)) codes.push(...(v as any[]).map(String));
+    else codes.push(String(v));
+  };
+  pushMaybe(um.role);
+  pushMaybe(um.roles);
+  pushMaybe(am.role);
+  pushMaybe(am.roles);
+  return unique(codes).filter(Boolean);
+}
+
 async function getRoleCodes(
-  supabase: ReturnType<typeof createMiddlewareClient>
+  supabase: ReturnType<typeof createMiddlewareClient>,
+  session: any
 ): Promise<string[]> {
-  // 1) Thử RPC nếu đã tạo public.fn_my_role_codes() → text[]
+  // 0) Fallback siêu nhanh từ session metadata (nếu có)
+  const metaCodes = readRolesFromSessionMeta(session);
+  if (metaCodes.length) return metaCodes;
+
+  // 1) Thử RPC: public.fn_my_role_codes() → text[]
   try {
     const { data, error } = await (supabase as any).rpc('fn_my_role_codes');
     if (!error && Array.isArray(data)) return data as string[];
@@ -47,20 +74,21 @@ async function getRoleCodes(
     const { data: urs, error: e1 } = await supabase
       .from('user_roles')
       .select('role_id');
-    if (e1 || !urs?.length) return [];
+    if (e1 || !urs?.length) return metaCodes; // vẫn trả về meta nếu có
 
     const roleIds = urs.map((u: any) => u.role_id).filter(Boolean);
-    if (!roleIds.length) return [];
+    if (!roleIds.length) return metaCodes;
 
     const { data: roles, error: e2 } = await supabase
       .from('roles')
       .select('id, code')
       .in('id', roleIds);
-    if (e2 || !roles?.length) return [];
+    if (e2 || !roles?.length) return metaCodes;
 
-    return roles.map((r: any) => r.code as string).filter(Boolean);
+    const dbCodes = roles.map((r: any) => r.code as string).filter(Boolean);
+    return unique([...(metaCodes ?? []), ...dbCodes]);
   } catch {
-    return [];
+    return metaCodes ?? [];
   }
 }
 
@@ -104,20 +132,18 @@ export async function middleware(req: NextRequest) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('next', pathname + (search || ''));
 
-    // VERY IMPORTANT: chuyển tiếp Set-Cookie từ `res` của Supabase
+    // chuyển tiếp Set-Cookie từ `res` của Supabase
     const redirect = NextResponse.redirect(loginUrl);
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) redirect.headers.set('set-cookie', setCookie);
     return redirect;
   }
 
-  // Lấy các role code của user hiện tại
-  const codes = await getRoleCodes(supabase);
+  // Lấy các role code của user hiện tại (meta → RPC → DB)
+  const codes = await getRoleCodes(supabase, session);
 
   // admin → qua tất cả
-  if (codes.includes('admin')) {
-    return res;
-  }
+  if (codes.includes('admin')) return res;
 
   // Kiểm tra quyền theo rule
   const allowed = codes.some((c) => rule.allowed.includes(c as RoleCode));
@@ -126,7 +152,7 @@ export async function middleware(req: NextRequest) {
     home.searchParams.set('denied', '1');
     home.searchParams.set('reason', codes.length ? 'not-allowed' : 'no-roles');
 
-    // IMPORTANT: chuyển tiếp Set-Cookie từ Supabase
+    // chuyển tiếp Set-Cookie từ Supabase
     const redirect = NextResponse.redirect(home);
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) redirect.headers.set('set-cookie', setCookie);
