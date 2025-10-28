@@ -2,200 +2,237 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+type FrameworkOpt = { id: string; label: string };
+type DeptOpt = { id: string; name: string; code?: string };
 type CourseRow = {
-  framework_id: string;
+  id: string;
   code: string;
   name: string | null;
   department_id: string | null;
   department: { id: string; name: string } | null;
 };
 
-type Dept = { id: string; name: string };
-
-export default function AcademicAffairsCoursesPage() {
+export default function CoursesManagePage() {
+  const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
+  const [departments, setDepartments] = useState<DeptOpt[]>([]);
   const [frameworkId, setFrameworkId] = useState('');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
   const [rows, setRows] = useState<CourseRow[]>([]);
-  const [depts, setDepts] = useState<Dept[]>([]);
-  const [dirty, setDirty] = useState<Record<string, string | null>>({}); // key `${fw}|${code}` -> dept_id|null
+  const [total, setTotal] = useState(0);
 
-  // Load frameworks (tận dụng API có sẵn: /api/academic-affairs/framework/list)
-  const [frameworks, setFrameworks] = useState<any[]>([]);
+  // Fetch frameworks + departments
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/academic-affairs/framework/list');
-        const js = await r.json();
-        setFrameworks(js.items || []);
-      } catch {}
+        const [fwR, depR] = await Promise.all([
+          fetch('/api/academic-affairs/frameworks').then(r => r.json()),
+          fetch('/api/academic-affairs/departments/list').then(r => r.json()),
+        ]);
+        setFrameworks(fwR.items || []);
+        setDepartments(depR.items || []);
+        // auto chọn khung mới nhất nếu chưa chọn
+        if (!frameworkId && fwR.items?.[0]?.id) setFrameworkId(fwR.items[0].id);
+      } catch { /* noop */ }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load departments
-  useEffect(() => {
-    (async () => {
-      try {
-        // Dùng bảng departments trực tiếp qua route tạm:
-        // bạn có thể thay bằng API riêng nếu đã có.
-        const r = await fetch('/api/academic-affairs/departments/list', { method: 'POST' })
-          .catch(() => null as any);
-        if (r && r.ok) {
-          const js = await r.json();
-          setDepts((js.items || []).map((d: any) => ({ id: d.id, name: d.name })));
-        } else {
-          // fallback: gọi trực tiếp PostgREST (nếu mở)
-          const r2 = await fetch('/api/academic-affairs/framework/graph'); // placeholder để tránh lỗi
-          setDepts([]); // nếu chưa có API, vẫn cho user gán null
-        }
-      } catch {
-        setDepts([]);
-      }
-    })();
-  }, []);
-
-  async function loadData() {
+  // Fetch courses khi đổi framework/q/page
+  async function loadCourses(fp = frameworkId, fq = q, p = page) {
+    if (!fp) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (frameworkId) params.set('framework_id', frameworkId);
-      if (q.trim()) params.set('q', q.trim());
-      const r = await fetch(`/api/academic-affairs/courses/list?` + params.toString());
-      const js = await r.json();
+      params.set('framework_id', fp);
+      if (fq) params.set('q', fq);
+      params.set('page', String(p));
+      params.set('page_size', String(pageSize));
+      const js = await fetch(`/api/academic-affairs/courses/list?${params.toString()}`).then(r => r.json());
       setRows(js.items || []);
-      setDirty({});
+      setTotal(js.total || 0);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { loadData(); /* eslint-disable-next-line */ }, [frameworkId]);
-
-  const modifiedCount = useMemo(() => Object.keys(dirty).length, [dirty]);
-
-  async function saveChanges() {
-    if (!modifiedCount) return;
-    const items = Object.entries(dirty).map(([k, v]) => {
-      const [fw, code] = k.split('|');
-      return { framework_id: fw, course_code: code, department_id: v };
-    });
-    const r = await fetch('/api/academic-affairs/courses/assign', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ items }),
-    });
-    const js = await r.json();
-    if (!r.ok || !js?.ok) {
-      alert(js?.error || 'Cập nhật thất bại');
-      return;
+  useEffect(() => {
+    if (frameworkId) {
+      setPage(1);
+      loadCourses(frameworkId, q, 1);
     }
-    await loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameworkId]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  function formatDeptName(id: string | null) {
+    if (!id) return '— Chưa gán —';
+    const d = departments.find(x => x.id === id);
+    return d?.name || '—';
   }
 
+  async function onAssign(course: CourseRow, deptId: string | null) {
+    if (!frameworkId) return;
+    const res = await fetch('/api/academic-affairs/courses/assign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        framework_id: frameworkId,
+        course_code: course.code,
+        department_id: deptId,
+      }),
+    });
+    const js = await res.json();
+    if (!res.ok || !js?.ok) {
+      alert(js?.error || 'Gán bộ môn thất bại');
+      return;
+    }
+    // Cập nhật ngay trên UI
+    setRows(prev =>
+      prev.map(r =>
+        r.id === course.id
+          ? { ...r, department_id: deptId, department: deptId ? { id: deptId, name: formatDeptName(deptId) } : null }
+          : r
+      )
+    );
+  }
+
+  // UI
   return (
-    <section className="space-y-4">
-      <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="space-y-4">
+      {/* Header + Filters */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Quản lý học phần</h1>
-            <p className="text-sm text-slate-600">Gán học phần cho Bộ môn quản lý để đồng bộ các chức năng khác.</p>
+            <p className="text-sm text-slate-600">Gán bộ môn quản lý cho mỗi học phần để đồng bộ với Hộp thư góp ý và trang Bộ môn.</p>
           </div>
+
           <div className="grid w-full gap-3 md:w-auto md:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-semibold">Khung chương trình</label>
               <select
                 value={frameworkId}
                 onChange={(e) => setFrameworkId(e.target.value)}
-                className="min-w-[260px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
+                className="min-w-[260px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
               >
                 <option value="">— Chọn khung —</option>
-                {frameworks.map((f: any) => (
-                  <option key={f.id} value={f.id}>
-                    {[f.doi_tuong, f.chuyen_nganh, f.nien_khoa].filter(Boolean).join(' • ') || f.id}
-                  </option>
+                {frameworks.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="mb-1 block text-xs font-semibold">Tìm kiếm</label>
+              <label className="mb-1 block text-xs font-semibold">Tìm học phần</label>
               <div className="flex gap-2">
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Mã/tên học phần…"
-                  className="min-w-[220px] flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); loadCourses(frameworkId, q, 1); } }}
+                  placeholder="Nhập mã hoặc tên học phần…"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
                 />
                 <button
-                  onClick={loadData}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                  onClick={() => { setPage(1); loadCourses(frameworkId, q, 1); }}
+                  className="rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:opacity-90 active:scale-[0.98]"
                 >
-                  Làm mới
+                  Tìm
                 </button>
               </div>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
+      {/* Table */}
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="text-sm text-slate-600">
-            {loading ? 'Đang tải…' : `Tìm thấy ${rows.length} học phần`}
-          </div>
-          <button
-            disabled={!modifiedCount}
-            onClick={saveChanges}
-            className={[
-              'rounded-xl px-4 py-2 text-sm font-semibold',
-              modifiedCount ? 'bg-brand-600 text-white hover:opacity-95 active:scale-[0.99]' : 'bg-slate-300 text-white cursor-not-allowed',
-            ].join(' ')}
-          >
-            Lưu thay đổi {modifiedCount ? `(${modifiedCount})` : ''}
-          </button>
-        </div>
-
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-left text-slate-600">
-                <th className="px-3 py-2">Mã học phần</th>
-                <th className="px-3 py-2">Tên học phần</th>
-                <th className="px-3 py-2 w-[280px]">Bộ môn quản lý</th>
+                <th className="pb-2 pr-4">Mã học phần</th>
+                <th className="pb-2 pr-4">Tên học phần</th>
+                <th className="pb-2 pr-4">Bộ môn quản lý</th>
+                <th className="pb-2 pr-2">Gán</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const key = `${r.framework_id}|${r.code}`;
-                const cur = key in dirty ? dirty[key] : r.department_id;
-                return (
-                  <tr key={key} className="border-t">
-                    <td className="px-3 py-2 font-medium">{r.code}</td>
-                    <td className="px-3 py-2">{r.name || <span className="text-slate-400">—</span>}</td>
-                    <td className="px-3 py-2">
+              {!frameworkId ? (
+                <tr><td colSpan={4} className="py-6 text-center text-slate-500">Hãy chọn khung chương trình để bắt đầu.</td></tr>
+              ) : loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="py-3 pr-4"><div className="h-5 w-24 animate-pulse rounded bg-slate-200" /></td>
+                    <td className="py-3 pr-4"><div className="h-5 w-64 animate-pulse rounded bg-slate-200" /></td>
+                    <td className="py-3 pr-4"><div className="h-5 w-40 animate-pulse rounded bg-slate-200" /></td>
+                    <td className="py-3 pr-2"><div className="h-8 w-20 animate-pulse rounded bg-slate-200" /></td>
+                  </tr>
+                ))
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={4} className="py-6 text-center text-slate-500">Không có học phần nào.</td></tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="py-3 pr-4 font-mono">{r.code}</td>
+                    <td className="py-3 pr-4">{r.name || <span className="text-slate-400">—</span>}</td>
+                    <td className="py-3 pr-4">
                       <select
-                        value={cur || ''}
-                        onChange={(e) =>
-                          setDirty((d) => ({ ...d, [key]: e.target.value ? e.target.value : null }))
-                        }
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
+                        value={r.department_id || ''}
+                        onChange={(e) => onAssign(r, e.target.value || null)}
+                        className="min-w-[220px] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-brand-300"
                       >
                         <option value="">— Chưa gán —</option>
-                        {depts.map((d) => (
+                        {departments.map((d) => (
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
                       </select>
                     </td>
+                    <td className="py-3 pr-2">
+                      <button
+                        onClick={() => loadCourses(frameworkId, q, page)}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50"
+                        title="Làm mới dòng"
+                      >
+                        Làm mới
+                      </button>
+                    </td>
                   </tr>
-                );
-              })}
-              {!rows.length && !loading && (
-                <tr>
-                  <td colSpan={3} className="px-3 py-8 text-center text-slate-400">Không có dữ liệu</td>
-                </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {total > 0 && (
+          <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+            <div>Tổng: {total}</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { const p = Math.max(1, page - 1); setPage(p); loadCourses(frameworkId, q, p); }}
+                disabled={page <= 1}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 disabled:opacity-50"
+              >
+                ← Trước
+              </button>
+              <span>Trang {page}/{totalPages}</span>
+              <button
+                onClick={() => { const p = Math.min(totalPages, page + 1); setPage(p); loadCourses(frameworkId, q, p); }}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 disabled:opacity-50"
+              >
+                Sau →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-    </section>
+    </div>
   );
 }
