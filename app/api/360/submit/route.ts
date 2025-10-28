@@ -1,116 +1,121 @@
-// app/api/360/submit/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { getSupabase, createServiceClient } from '@/lib/supabaseServer';
+import { getSupabaseFromRequest, createServiceClient } from '@/lib/supabaseServer';
 
-type Item = {
-  item_key: string;
-  selected_level: string;
-  score?: number | null;
-  comment?: string | null;
+/**
+ * Body mẫu:
+ * {
+ *   request_id: string,
+ *   rubric_id: string,
+ *   overall_comment?: string,
+ *   items: Array<{ item_key: string; selected_level: string; score?: number; comment?: string }>
+ * }
+ */
+type SubmitBody = {
+  request_id?: string;
+  rubric_id?: string;
+  overall_comment?: string | null;
+  items?: Array<{
+    item_key: string;
+    selected_level: string;
+    score?: number | null;
+    comment?: string | null;
+  }>;
 };
+
+async function getStudentIdByUserId(sb: any, user_id: string) {
+  const { data, error } = await sb
+    .from('students')
+    .select('id')
+    .eq('user_id', user_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ?? null;
+}
 
 export async function POST(req: Request) {
   try {
-    const supabase = getSupabase();
-
-    // Yêu cầu đăng nhập
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
-    if (authErr) return NextResponse.json({ error: authErr.message }, { status: 401 });
+    const sb = getSupabaseFromRequest(req);
+    const { data: { user } } = await sb.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Body
-    const body = (await req.json().catch(() => ({}))) as {
-      request_id?: number;
-      overall_comment?: string | null;
-      items?: Item[];
-    };
-
-    const request_id = Number(body.request_id);
-    const items = Array.isArray(body.items) ? body.items : [];
-    const overall_comment = body.overall_comment ?? null;
-
-    if (!request_id || !Number.isFinite(request_id) || !Array.isArray(items)) {
-      return NextResponse.json({ error: 'request_id & items[] required' }, { status: 400 });
+    const body = (await req.json().catch(() => ({}))) as SubmitBody;
+    const request_id = String(body.request_id || '');
+    const rubric_id  = String(body.rubric_id  || '');
+    if (!request_id || !rubric_id) {
+      return NextResponse.json({ error: 'Thiếu request_id hoặc rubric_id' }, { status: 400 });
     }
 
-    // 1) Lấy request của người chấm (RLS đảm bảo chỉ thấy request hợp lệ)
-    const { data: reqRow, error: reqErr } = await supabase
+    // Lấy evaluation_request
+    const { data: reqRow, error: reqErr } = await sb
       .from('evaluation_requests')
-      .select('id,status,group_code,campaign_id,evaluatee_user_id')
+      .select('id, status, evaluator_user_id, evaluatee_user_id, campaign_id, rubric_id')
       .eq('id', request_id)
-      .single();
+      .maybeSingle();
     if (reqErr) return NextResponse.json({ error: reqErr.message }, { status: 400 });
-    if (!reqRow) return NextResponse.json({ error: 'Request not found' }, { status: 404 });
+    if (!reqRow) return NextResponse.json({ error: 'Request không tồn tại' }, { status: 404 });
+    if (reqRow.evaluator_user_id !== user.id) {
+      return NextResponse.json({ error: 'Bạn không phải người được phân công' }, { status: 403 });
+    }
     if (reqRow.status !== 'pending') {
-      return NextResponse.json({ error: 'Already submitted or invalid' }, { status: 400 });
+      return NextResponse.json({ error: `Trạng thái hiện tại: ${reqRow.status}` }, { status: 400 });
     }
 
-    // 2) Lấy campaign để biết rubric_id
-    const { data: camp, error: campErr } = await supabase
-      .from('evaluation_campaigns')
-      .select('id,rubric_id')
-      .eq('id', reqRow.campaign_id)
-      .single();
-    if (campErr) return NextResponse.json({ error: campErr.message }, { status: 400 });
-    if (!camp?.rubric_id) return NextResponse.json({ error: 'rubric_id missing' }, { status: 400 });
+    // Map evaluatee_user_id -> students.id (FK bắt buộc)
+    const student_id = await getStudentIdByUserId(sb, reqRow.evaluatee_user_id);
+    if (!student_id) {
+      return NextResponse.json({
+        error: 'Không tìm thấy bản ghi trong bảng students cho evaluatee_user_id. Hãy đảm bảo sinh viên đã có dòng trong public.students (mapping user_id → students.id).'
+      }, { status: 400 });
+    }
 
-    // 3) Tạo observation (kind = eval360)
-    const { data: obs, error: oerr } = await supabase
+    // Tạo observation mới: kind = 'eval360' (đúng CHECK), course_id để null nếu campaign không ràng buộc học phần
+    const { data: obs, error: insErr } = await sb
       .from('observations')
       .insert({
-        rubric_id: camp.rubric_id, // UUID
-        student_user_id: reqRow.evaluatee_user_id,
-        teacher_user_id: user.id, // người chấm
-        status: 'submitted',
-        overall_comment,
-        submitted_at: new Date().toISOString(),
+        rubric_id,
+        student_id,
+        course_id: null,           // có thể set từ campaign nếu bạn muốn map sang courses
+        rater_id: user.id,
         kind: 'eval360',
+        note: body.overall_comment ?? null,
+        observed_at: new Date().toISOString(),
       })
-      .select('*')
+      .select('id')
       .single();
-    if (oerr) return NextResponse.json({ error: oerr.message }, { status: 400 });
-    if (!obs) return NextResponse.json({ error: 'Create observation failed' }, { status: 500 });
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 
-    // 4) Insert item scores
-    if (items.length > 0) {
-      const payload = items.map((it) => ({
+    // Lưu các item score "mềm" (item_key/selected_level/score/comment).
+    // Giữ nguyên cột cũ để tương thích RPC cũ nếu cần.
+    if (Array.isArray(body.items) && body.items.length) {
+      const payload = body.items.map((it) => ({
         observation_id: obs.id,
         item_key: it.item_key,
         selected_level: it.selected_level,
         score: it.score ?? null,
         comment: it.comment ?? null,
+        -- level_rank/level_label nếu cần bạn có thể map thêm từ rubrics.definition
       }));
-      const { error: serr } = await supabase.from('observation_item_scores').insert(payload);
-      if (serr) return NextResponse.json({ error: serr.message }, { status: 400 });
+      const { error: sErr } = await sb.from('observation_item_scores').insert(payload);
+      if (sErr) return NextResponse.json({ error: sErr.message }, { status: 400 });
     }
 
-    // 5) Đánh dấu request submitted + gắn observation_id
-    const { error: uerr } = await supabase
+    // Đánh dấu yêu cầu đã nộp
+    const { error: upErr } = await sb
       .from('evaluation_requests')
-      .update({ status: 'submitted', observation_id: obs.id })
+      .update({ status: 'submitted' })
       .eq('id', request_id);
-    if (uerr) return NextResponse.json({ error: uerr.message }, { status: 400 });
+    if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 });
 
-    // 6) Cập nhật CLO qua RPC (service role)
-    const admin = createServiceClient(); // chắc chắn SupabaseClient (nếu thiếu ENV sẽ throw)
-    const { error: rerr } = await admin.rpc('compute_observation_clo_results', {
-      p_observation_id: obs.id,
-    });
-    if (rerr) {
-      return NextResponse.json(
-        { error: `compute_observation_clo_results: ${rerr.message}` },
-        { status: 400 }
-      );
-    }
+    // (Tuỳ chọn) gọi RPC tính kết quả CLO nếu bạn đã sẵn sàng dùng rubric mapping
+    // const admin = createServiceClient();
+    // const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: obs.id });
+    // if (rerr) return NextResponse.json({ error: `RPC: ${rerr.message}` }, { status: 400 });
 
-    return NextResponse.json({ ok: true, observation_id: obs.id });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
+    return NextResponse.json({ ok: true, observation_id: obs.id }, { status: 200 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
