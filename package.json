@@ -18,7 +18,8 @@
     "zod": "^3.23.8",
     "xlsx": "^0.18.5",
     "@supabase/auth-helpers-nextjs": "latest",
-    "@supabase/ssr": "latest"
+    "@supabase/ssr": "latest",
+    "lucide-react": "^0.468.0"
   },
   "devDependencies": {
     "@types/node": "20.11.24",
