@@ -34,8 +34,29 @@ type Ctx = {
   signOut: () => Promise<void>;
 };
 
-const AuthCtx = createContext<Ctx>({ user: null, profile: null, loading: true, signOut: async () => {} });
+const AuthCtx = createContext<Ctx>({
+  user: null,
+  profile: null,
+  loading: true,
+  signOut: async () => {},
+});
+
 export const useAuth = () => useContext(AuthCtx);
+
+type StaffRow = {
+  user_id: string;
+  full_name?: string | null;
+  department_id?: string | null;
+  // Có thể nhận về 1 trong 2 dạng dưới đây:
+  department?: { id: string; name: string } | null; // khi dùng alias/định danh FK
+  departments?: { id: string; name: string }[] | { id: string; name: string } | null; // fallback
+};
+
+type StudentRow = {
+  user_id: string;
+  full_name?: string | null;
+  mssv?: string | null;
+};
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = getSupabase();
@@ -45,33 +66,62 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [loading, setLoading] = useState(true);
 
   async function loadProfile(uid: string) {
-    // Ưu tiên staff, nếu không có thì tìm student
-    const [{ data: stf }, { data: std }] = await Promise.all([
-      supabase
-        .from('staff')
-        .select('user_id, full_name, department_id, departments ( id, name )')
-        .eq('user_id', uid)
-        .maybeSingle(),
-      supabase.from('students').select('user_id, full_name, mssv').eq('user_id', uid).maybeSingle(),
-    ]);
+    // Join rõ bằng tên FK để nhận về object "department"
+    const staffQ = supabase
+      .from('staff')
+      .select(
+        `
+        user_id,
+        full_name,
+        department_id,
+        department:departments!staff_department_id_fkey ( id, name )
+      `
+      )
+      .eq('user_id', uid)
+      .maybeSingle();
+
+    const studentQ = supabase
+      .from('students')
+      .select('user_id, full_name, mssv')
+      .eq('user_id', uid)
+      .maybeSingle();
+
+    const [{ data: stf }, { data: std }] = await Promise.all([staffQ, studentQ]);
 
     if (stf) {
+      const s = stf as StaffRow;
+
+      // Fallback: nếu vì lý do nào đó vẫn trả "departments"
+      const deptRaw = s.department ?? s.departments ?? null;
+      const deptObj = Array.isArray(deptRaw) ? deptRaw[0] : (deptRaw as any) ?? null;
+
+      const displayName =
+        s.full_name || user?.user_metadata?.name || user?.email || 'Người dùng';
+
       setProfile({
         role: 'staff',
-        name: stf.full_name || user?.user_metadata?.name || user?.email || 'Người dùng',
-        dept_id: stf.department_id ?? null,
-        dept_name: stf.departments?.name ?? null,
+        name: displayName,
+        // Ưu tiên department_id từ staff; nếu null thì lấy từ deptObj.id
+        dept_id: s.department_id ?? (deptObj?.id ?? null),
+        dept_name: deptObj?.name ?? null,
       });
       return;
     }
+
     if (std) {
+      const d = std as StudentRow;
+      const displayName =
+        d.full_name || user?.user_metadata?.name || user?.email || 'Sinh viên';
+
       setProfile({
         role: 'student',
-        name: std.full_name || user?.user_metadata?.name || user?.email || 'Sinh viên',
-        mssv: std.mssv ?? null,
+        name: displayName,
+        mssv: d.mssv ?? null,
       });
       return;
     }
+
+    // Không phải staff/student
     setProfile({
       role: 'other',
       name: user?.user_metadata?.name || user?.email || 'Tài khoản',
@@ -112,7 +162,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     await supabase.auth.signOut();
     setProfile(null);
     setUser(null);
-    router.push('/'); // tuỳ bạn muốn về trang nào
+    router.push('/');
   };
 
   const value = useMemo(() => ({ user, profile, loading, signOut }), [user, profile, loading]);
