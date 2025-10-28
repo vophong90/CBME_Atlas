@@ -6,10 +6,7 @@ import { Inter } from 'next/font/google';
 const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-sans' });
 
 export const metadata: Metadata = {
-  title: {
-    default: 'CBME Atlas',
-    template: '%s — CBME Atlas',
-  },
+  title: { default: 'CBME Atlas', template: '%s — CBME Atlas' },
   description: 'CBME | PLO–CLO–PI–EPA | Minh chứng & báo cáo realtime',
   manifest: '/assets/brand/site.webmanifest',
   icons: {
@@ -47,35 +44,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="vi" className={inter.variable}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        {/* Bạn có thể thêm preload font/icon nếu cần */}
       </head>
       {/* CSS var --brand giúp dùng màu thương hiệu đồng nhất cả khi chưa cấu hình tailwind theme */}
-      <body
-        className="font-sans antialiased text-slate-900"
-        style={{ ['--brand' as any]: '#0E7BD0' }}
-      >
-        {/* Nền gradient rất nhẹ để tạo chiều sâu tổng thể */}
+      <body className="font-sans antialiased text-slate-900" style={{ ['--brand' as any]: '#0E7BD0' }}>
         <div className="relative min-h-screen bg-[radial-gradient(1200px_600px_at_-20%_-10%,rgba(14,123,208,0.06),transparent_60%),radial-gradient(1200px_600px_at_120%_-10%,rgba(43,174,114,0.06),transparent_60%),linear-gradient(180deg,#ffffff_0%,#f7fafc_100%)]">
           <TopNav />
-
           <main className="mx-auto max-w-7xl px-4 md:px-6">{children}</main>
 
+          {/* Footer tinh gọn */}
           <footer className="mt-24 border-t bg-white/70 backdrop-blur">
-            <div className="mx-auto max-w-7xl px-4 md:px-6 py-8 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-4">
-              <div>
-                © {new Date().getFullYear()} Khoa Y học Cổ truyền – ĐHYD TP.HCM
-              </div>
-              <nav className="flex items-center gap-4">
-                <a className="hover:text-slate-900" href="/docs">Tài liệu</a>
-                <a className="hover:text-slate-900" href="/privacy">Bảo mật</a>
-                <a
-                  href="/login"
-                  className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-white hover:opacity-90"
-                  style={{ background: 'var(--brand)' }}
-                >
-                  Đăng nhập
-                </a>
-              </nav>
+            <div className="mx-auto max-w-7xl px-4 md:px-6 py-8 text-sm text-slate-600 flex items-center justify-between">
+              <div>© {new Date().getFullYear()} Khoa Y học Cổ truyền – ĐHYD TP.HCM</div>
+              <div className="text-slate-500">CBME Atlas</div>
             </div>
           </footer>
         </div>
