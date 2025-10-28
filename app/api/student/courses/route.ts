@@ -3,76 +3,53 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { createServiceClient, getSupabaseFromRequest } from '@/lib/supabaseServer';
+import { createServiceClient } from '@/lib/supabaseServer';
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const paramStudentId = (searchParams.get('student_id') || '').trim();
+    const url = new URL(req.url);
+    const studentId = url.searchParams.get('student_id') || '';
+    const explicitFw = url.searchParams.get('framework_id') || '';
 
-    const admin = createServiceClient(); // service-role (bỏ qua RLS)
-    let studentId = paramStudentId;
+    const db = createServiceClient();
 
-    // Nếu caller không truyền student_id → dò theo auth session (user_id)
-    if (!studentId) {
-      const sb = getSupabaseFromRequest(req);
-      const { data: { user } } = await sb.auth.getUser();
-      if (user?.id) {
-        const { data: stu } = await admin
-          .from('students')
-          .select('id')
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle();
-        if (stu?.id) studentId = stu.id as string;
-      }
+    // 1) Xác định framework_id (ưu tiên query param, sau đó từ bảng students)
+    let frameworkId = explicitFw;
+    if (!frameworkId && studentId) {
+      const { data: stu, error: eStu } = await db
+        .from('students')
+        .select('framework_id')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (eStu) throw eStu;
+      frameworkId = stu?.framework_id || '';
     }
 
-    if (!studentId) {
-      // Không xác định được sinh viên → trả mảng trống (để UI không vỡ)
-      return NextResponse.json<string[]>([]);
-    }
+    // 2) Lấy courses + thông tin bộ môn (departments)
+    let q = db
+      .from('courses')
+      .select('course_code, course_name, department:departments(id, name)')
+      .order('course_code', { ascending: true });
 
-    // Lấy thông tin sinh viên: framework_id + mssv (để lọc kết quả tải lên nếu có)
-    const { data: student, error: eStu } = await admin
-      .from('students')
-      .select('framework_id, mssv')
-      .eq('id', studentId)
-      .maybeSingle();
+    if (frameworkId) q = q.eq('framework_id', frameworkId);
 
-    if (eStu) return NextResponse.json<string[]>([], { status: 200 });
-    const frameworkId = student?.framework_id || null;
-    const mssv = student?.mssv || null;
+    const { data, error } = await q;
+    if (error) throw error;
 
-    // 1) Ưu tiên lấy các học phần đã có kết quả tải lên cho đúng sinh viên
-    let courseCodes: string[] = [];
-    if (mssv) {
-      const { data: up, error: eUp } = await admin
-        .from('student_clo_results_uploads')
-        .select('course_code')
-        .eq('mssv', mssv);
+    // 3) Map về shape mà trang Feedback đang dùng
+    const items = (data ?? []).map((r: any) => ({
+      code: r.course_code,
+      name: r.course_name ?? null,
+      department: r.department
+        ? { id: r.department.id, name: r.department.name }
+        : null,
+    }));
 
-      if (!eUp && up) {
-        courseCodes = Array.from(new Set(up.map(r => String(r.course_code)).filter(Boolean)));
-      }
-    }
-
-    // 2) Nếu chưa có kết quả tải lên → fallback: toàn bộ courses theo framework_id
-    if ((!courseCodes || courseCodes.length === 0) && frameworkId) {
-      const { data: all, error: eAll } = await admin
-        .from('courses')
-        .select('course_code')
-        .eq('framework_id', frameworkId);
-
-      if (!eAll && all) {
-        courseCodes = Array.from(new Set(all.map(r => String(r.course_code)).filter(Boolean)));
-      }
-    }
-
-    // Trả ra mảng đã sort (string[])
-    return NextResponse.json<string[]>(courseCodes.sort());
-  } catch {
-    // Không lộ lỗi nội bộ ra UI — trả mảng rỗng để an toàn
-    return NextResponse.json<string[]>([], { status: 200 });
+    return NextResponse.json({ items }, { status: 200 });
+  } catch (e: any) {
+    return NextResponse.json(
+      { items: [], error: e?.message || 'Server error' },
+      { status: 200 }
+    );
   }
 }
