@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/components/AuthProvider';
 
 /** ========= Inline icons (no deps) ========= */
 type IconProps = React.SVGProps<SVGSVGElement>;
@@ -45,70 +46,34 @@ const ResultsIcon = (p: IconProps) => (
   </svg>
 );
 
-/** ========= Auth / role helpers ========= */
-type MeResp = {
-  user?: { id: string; email?: string | null; name?: string | null } | null;
-  roles?: string[] | null;
-  profile?: { role?: string | null } | null;
-};
-
-const canSeeQA = (me?: MeResp | null) => {
-  const allow = new Set(['admin', 'qa', 'academic_affairs', 'secretary']);
-  const roles = [
-    ...(me?.roles || []),
-    me?.profile?.role || '',
-  ]
-    .filter(Boolean)
-    .map((r) => String(r).toLowerCase());
-  return roles.some((r) => allow.has(r));
-};
-
-/** ========= Shell layout ========= */
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [me, setMe] = useState<MeResp | null>(null);
 
-  // Restore / persist sidebar state
+  // Lấy role từ AuthProvider
+  const { profile } = useAuth(); // profile.role: 'admin' | 'qa' | ...
+
+  const showQA = useMemo(() => {
+    const r = String(profile?.role || '').toLowerCase();
+    return ['admin', 'qa', 'academic_affairs', 'secretary'].includes(r);
+  }, [profile?.role]);
+
+  // Khôi phục / lưu trạng thái sidebar
   useEffect(() => {
-    try {
-      const s = localStorage.getItem('eval360SidebarCollapsed');
-      if (s) setCollapsed(s === '1');
-    } catch {}
+    try { const s = localStorage.getItem('eval360SidebarCollapsed'); if (s) setCollapsed(s === '1'); } catch {}
   }, []);
   useEffect(() => {
-    try {
-      localStorage.setItem('eval360SidebarCollapsed', collapsed ? '1' : '0');
-    } catch {}
+    try { localStorage.setItem('eval360SidebarCollapsed', collapsed ? '1' : '0'); } catch {}
   }, [collapsed]);
 
-  // Fetch current user/roles to decide which tabs to show
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch('/api/auth/me', { credentials: 'include' });
-        const d = await r.json();
-        setMe(d || null);
-      } catch {
-        setMe(null);
-      }
-    })();
-  }, []);
-
-  const showQA = useMemo(() => canSeeQA(me), [me]);
-
   const NAV = useMemo(() => {
-    const arr = [
-      { href: '/360-eval/evaluate', label: 'Thực hiện đánh giá', Icon: CheckClipboard },
-    ] as Array<{ href: string; label: string; Icon: (p: IconProps) => JSX.Element }>;
-    if (showQA) {
-      arr.push(
-        { href: '/360-eval/forms',   label: 'Quản lý biểu mẫu',  Icon: FormsIcon   },
-        { href: '/360-eval/results', label: 'Kết quả theo MSSV', Icon: ResultsIcon },
-      );
-    }
-    return arr;
+    const base = [{ href: '/360-eval/evaluate', label: 'Thực hiện đánh giá', Icon: CheckClipboard }];
+    const qaTabs = [
+      { href: '/360-eval/forms',   label: 'Quản lý biểu mẫu',  Icon: FormsIcon   },
+      { href: '/360-eval/results', label: 'Kết quả theo MSSV', Icon: ResultsIcon },
+    ];
+    return showQA ? [...base, ...qaTabs] : base;
   }, [showQA]);
 
   return (
@@ -130,14 +95,9 @@ function Shell({ children }: { children: React.ReactNode }) {
           ].join(' ')}
         >
           <div className="flex items-center justify-between gap-2 p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">
-              360
-            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">360</div>
             {!collapsed && <div className="text-sm font-semibold">Multi-source Evaluation</div>}
-            <button
-              onClick={() => setCollapsed((v) => !v)}
-              className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50"
-            >
+            <button onClick={() => setCollapsed(v => !v)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
               {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
@@ -174,20 +134,14 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* Mobile Drawer */}
         {mobileOpen && (
           <>
-            <div
-              className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden"
-              onClick={() => setMobileOpen(false)}
-            />
+            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
             <aside className="fixed left-0 top-0 z-50 h-full w-72 overflow-y-auto border-r border-slate-200 bg-white md:hidden">
               <div className="flex items-center justify-between gap-2 p-3">
                 <div className="flex items-center gap-2">
                   <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">360</div>
                   <div className="text-sm font-semibold">Multi-source Evaluation</div>
                 </div>
-                <button
-                  onClick={() => setMobileOpen(false)}
-                  className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50"
-                >
+                <button onClick={() => setMobileOpen(false)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
                   <ChevronLeft className="h-4 w-4" />
                 </button>
               </div>
@@ -216,7 +170,6 @@ function Shell({ children }: { children: React.ReactNode }) {
 
         {/* Main */}
         <main className="flex-1 p-6">
-          {/* Header card (giữ đồng bộ với layout khác) */}
           <div className="mb-6">
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -229,7 +182,6 @@ function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </div>
-
           {children}
         </main>
       </div>
