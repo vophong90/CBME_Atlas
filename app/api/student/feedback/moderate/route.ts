@@ -4,151 +4,181 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-const PROXY_URL = 'https://gpt-api-19xu.onrender.com'; // proxy PHP của bạn
+const RAW_PROXY_URL = process.env.PROXY_URL || 'https://gpt-api-19xu.onrender.com';
 const TIMEOUT_MS = 15000;
 
-type ModerationResult = { ok: boolean; reason?: string };
+type ModerationPayload = {
+  allowed?: boolean;      // phòng khi proxy trả JSON chat {allowed, reason}
+  reason?: string;
+  results?: Array<{       // schema của /v1/moderations
+    flagged: boolean;
+    categories?: Record<string, boolean>;
+  }>;
+};
 
-function quickLocalScreen(text: string): ModerationResult {
-  const clean = String(text || '').trim();
-
-  if (clean.length < 10) return { ok: false, reason: 'Nội dung quá ngắn' };
-
-  // số điện thoại: bắt cả dạng có khoảng trắng/dấu
-  const phoneLike = clean.replace(/[^\d]/g, '');
-  if (/\d{9,11}/.test(phoneLike)) {
-    return { ok: false, reason: 'Không đưa số điện thoại/cá nhân' };
+function getProxyModerationURL(): string {
+  try {
+    const u = new URL(RAW_PROXY_URL);
+    if (u.pathname === '' || u.pathname === '/') u.pathname = '/gpt.php';
+    return u.toString();
+  } catch {
+    return RAW_PROXY_URL.endsWith('.php')
+      ? RAW_PROXY_URL
+      : RAW_PROXY_URL.replace(/\/+$/, '') + '/gpt.php';
   }
-
-  // email
-  if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(clean)) {
-    return { ok: false, reason: 'Không nêu email/cá nhân' };
-  }
-
-  // link
-  if (/(https?:\/\/|www\.)/i.test(clean)) {
-    return { ok: false, reason: 'Không chèn liên kết' };
-  }
-
-  // một vài từ thô tục phổ biến (rất tối giản, bạn có thể mở rộng)
-  const badWords = /(địt|dm|đmm|c?mm|cặc|đéo|lồn|đụ|fuck|shit)/i;
-  if (badWords.test(clean)) {
-    return { ok: false, reason: 'Ngôn từ không phù hợp' };
-  }
-
-  return { ok: true };
 }
 
-function buildPrompt(text: string, kind: 'course' | 'faculty', target: string) {
-  return `
-Bạn là bộ lọc kiểm duyệt góp ý sinh viên (tiếng Việt). Chỉ chấp nhận nội dung mang tính xây dựng:
-- Cấm tục tĩu, xúc phạm, bôi nhọ, lăng mạ, phân biệt đối xử, đe doạ.
-- Cấm tố cáo/khởi kiện/kiện cáo/đòi bồi thường.
-- Cấm tiết lộ dữ liệu cá nhân (số điện thoại, email, link, địa chỉ...).
-- Khuyến khích góp ý lịch sự, tôn trọng, có gợi ý cải thiện cụ thể.
+function reasonFromCategories(categories: Record<string, boolean> | undefined) {
+  if (!categories) return 'Nội dung chưa phù hợp';
+  const flagged = Object.entries(categories)
+    .filter(([, v]) => v)
+    .map(([k]) =>
+      k
+        .replaceAll('_', ' ')
+        .replace('self harm', 'tự hại')
+        .replace('harassment', 'quấy rối/xúc phạm')
+        .replace('hate', 'thù ghét/phân biệt')
+        .replace('violence', 'bạo lực')
+        .replace('sexual', 'tình dục')
+        .replace('copyright', 'bản quyền'),
+    );
+  return flagged.length ? `Phát hiện: ${flagged.join(', ')}` : 'Nội dung chưa phù hợp';
+}
 
-Trả lời **DUY NHẤT** JSON hợp lệ theo mẫu:
-{"allowed": true|false, "reason": "Giải thích ngắn gọn bằng tiếng Việt"}
+async function callProxyModeration(message: string, signal: AbortSignal) {
+  const url = getProxyModerationURL();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ action: 'moderate', prompt: message }),
+    signal,
+  });
 
-Ngữ cảnh:
-- Đối tượng góp ý: ${kind === 'course' ? `Học phần: "${target}"` : `Giảng viên: "${target}"`}
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`proxy ${res.status} ${text?.slice(0, 120)}`);
+  }
 
-Nội dung góp ý:
-"""${text}"""
-`.trim();
+  const data = (await res.json().catch(() => null)) as ModerationPayload & any;
+
+  // Case A: Proxy forward /v1/moderations
+  const mod = data?.results?.[0];
+  if (mod && typeof mod.flagged === 'boolean') {
+    return {
+      ok: !mod.flagged,
+      reason: mod.flagged ? reasonFromCategories(mod.categories) : 'OK',
+    };
+  }
+
+  // Case B: Proxy dùng chat/response, content là JSON string {allowed, reason}
+  const content: string | undefined =
+    data?.choices?.[0]?.message?.content ?? data?.content ?? data?.text;
+
+  if (typeof content === 'string' && content.trim()) {
+    try {
+      const parsed = JSON.parse(content) as { allowed?: boolean; reason?: string };
+      if (typeof parsed.allowed === 'boolean') {
+        return {
+          ok: !!parsed.allowed,
+          reason: typeof parsed.reason === 'string'
+            ? parsed.reason
+            : (parsed.allowed ? 'OK' : 'Nội dung chưa phù hợp'),
+        };
+      }
+    } catch {
+      const m = content.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          const parsed = JSON.parse(m[0]) as { allowed?: boolean; reason?: string };
+          if (typeof parsed.allowed === 'boolean') {
+            return {
+              ok: !!parsed.allowed,
+              reason: typeof parsed.reason === 'string'
+                ? parsed.reason
+                : (parsed.allowed ? 'OK' : 'Nội dung chưa phù hợp'),
+            };
+          }
+        } catch {/* ignore */}
+      }
+    }
+  }
+
+  throw new Error('proxy invalid payload');
+}
+
+async function callOpenAIModeration(message: string, signal: AbortSignal) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('missing OPENAI_API_KEY');
+
+  const res = await fetch('https://api.openai.com/v1/moderations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'omni-moderation-latest',
+      input: message,
+    }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`openai ${res.status} ${text?.slice(0, 120)}`);
+  }
+
+  const data = (await res.json().catch(() => null)) as ModerationPayload;
+  const mod = data?.results?.[0];
+  if (!mod || typeof mod.flagged !== 'boolean') throw new Error('openai invalid payload');
+
+  return {
+    ok: !mod.flagged,
+    reason: mod.flagged ? reasonFromCategories(mod.categories) : 'OK',
+  };
 }
 
 export async function POST(req: Request) {
   try {
+    // Giữ API hiện tại của trang Sinh viên:
+    // body { text?: string; kind?: string; target?: string }
     const body = (await req.json().catch(() => ({}))) as {
       text?: string;
       kind?: string;
       target?: string;
     };
 
-    const text = String(body.text ?? '').trim();
-    const rawKind = String(body.kind ?? '').trim().toLowerCase();
-    const kind = rawKind === 'course' || rawKind === 'faculty' ? (rawKind as 'course' | 'faculty') : null;
-    const target = String(body.target ?? '').trim();
+    const text = String(body?.text ?? '').trim();
+    if (!text) return NextResponse.json({ ok: false, reason: 'Thiếu nội dung' }, { status: 400 });
 
-    if (!text || !kind || !target) {
-      return NextResponse.json({ ok: false, reason: 'Thiếu dữ liệu' }, { status: 400 });
-    }
-
-    // 1) Lọc nhanh phía server để tiết kiệm gọi GPT
-    const quick = quickLocalScreen(text);
-    if (!quick.ok) {
-      return NextResponse.json({ ok: false, reason: quick.reason || 'Nội dung chưa phù hợp' });
-    }
-
-    // 2) Gọi GPT qua proxy
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const prompt = buildPrompt(text, kind, target);
-    const res = await fetch(PROXY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // Nếu proxy của bạn không cần "model", có thể bỏ dòng model
-      body: JSON.stringify({ prompt, model: 'gpt-5' }),
-      signal: controller.signal,
-    }).catch((e) => {
-      throw new Error(`Không gọi được GPT proxy: ${e?.message || e}`);
-    });
-    clearTimeout(timer);
-
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      return NextResponse.json(
-        { ok: false, reason: `GPT lỗi (${res.status}): ${txt?.slice(0, 200) || 'unknown'}` },
-        { status: 502 }
-      );
-    }
-
-    const data = await res.json().catch(() => null);
-
-    // Proxy trả về schema OpenAI: lấy content tại choices[0].message.content
-    const content: string | undefined =
-      data?.choices?.[0]?.message?.content ??
-      data?.content ??
-      data?.text;
-
-    if (!content || typeof content !== 'string') {
-      return NextResponse.json({ ok: false, reason: 'GPT trả về dữ liệu không hợp lệ' }, { status: 502 });
-    }
-
-    // 3) Parse JSON do GPT trả về
-    let parsed: any = null;
     try {
-      parsed = JSON.parse(content);
-    } catch {
-      // Thử nắn JSON từ trong content (lấy đoạn {...} đầu tiên)
-      const m = content.match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          parsed = JSON.parse(m[0]);
-        } catch {
-          return NextResponse.json({ ok: false, reason: 'GPT không trả JSON hợp lệ' }, { status: 502 });
-        }
-      } else {
-        return NextResponse.json({ ok: false, reason: 'GPT không trả JSON hợp lệ' }, { status: 502 });
+      // 1) Ưu tiên gọi qua proxy PHP (action='moderate')
+      const viaProxy = await callProxyModeration(text, controller.signal);
+      clearTimeout(timer);
+      return NextResponse.json(viaProxy, { status: 200 });
+    } catch (eProxy: any) {
+      // 2) Fallback sang OpenAI Moderations
+      try {
+        const viaOpenAI = await callOpenAIModeration(text, controller.signal);
+        clearTimeout(timer);
+        return NextResponse.json(viaOpenAI, { status: 200 });
+      } catch (eOpenAI: any) {
+        clearTimeout(timer);
+        // Luôn trả 200 + ok=false để UI không bật nút Gửi
+        return NextResponse.json(
+          { ok: false, reason: eOpenAI?.message || eProxy?.message || 'Server error' },
+          { status: 200 },
+        );
       }
     }
-
-    const allowed = !!parsed?.allowed;
-    const reason =
-      typeof parsed?.reason === 'string'
-        ? parsed.reason
-        : allowed
-        ? 'OK'
-        : 'Nội dung chưa phù hợp';
-
-    return NextResponse.json({ ok: allowed, reason });
   } catch (e: any) {
-    const msg =
-      e?.name === 'AbortError'
-        ? 'Quá thời gian chờ GPT'
-        : e?.message || 'Lỗi máy chủ';
-    return NextResponse.json({ ok: false, reason: msg }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, reason: e?.name === 'AbortError' ? 'Quá thời gian chờ GPT' : (e?.message || 'Server error') },
+      { status: 200 },
+    );
   }
 }
