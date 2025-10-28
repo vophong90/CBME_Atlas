@@ -12,12 +12,6 @@ type Item = {
   comment?: string | null;
 };
 
-// ---- helpers ----
-function normKind(input?: string | null) {
-  const k = (input || '').trim().toLowerCase();
-  return k === 'eval360' ? 'eval360' : 'teacher'; // mặc định là 'teacher'
-}
-
 /** Helper: tra course_id từ framework_id + course_code */
 async function resolveCourseId(supabase: any, framework_id?: string | null, course_code?: string | null) {
   if (!framework_id || !course_code) return null;
@@ -29,6 +23,37 @@ async function resolveCourseId(supabase: any, framework_id?: string | null, cour
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data?.id ?? null;
+}
+
+/** Helper: chuẩn hóa về khóa chính students.id */
+async function resolveStudentPK(
+  supabase: any,
+  opts: { student_id?: string | null; student_user_id?: string | null; student_mssv?: string | null }
+): Promise<string | null> {
+  const { student_id, student_user_id, student_mssv } = opts || {};
+  if (student_id) return student_id;
+
+  if (student_user_id) {
+    const { data, error } = await supabase
+      .from('students')
+      .select('id')
+      .eq('user_id', student_user_id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.id) return data.id;
+  }
+
+  if (student_mssv) {
+    const { data, error } = await supabase
+      .from('students')
+      .select('id')
+      .eq('mssv', student_mssv)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.id) return data.id;
+  }
+
+  return null;
 }
 
 export async function GET(req: Request) {
@@ -49,7 +74,7 @@ export async function GET(req: Request) {
       if (!course_id) return NextResponse.json({ items: [] });
     }
 
-    // Lấy danh sách observation của GV hiện tại (RLS lọc theo rater_id)
+    // Lấy danh sách observation của GV hiện tại (RLS nên lọc theo rater_id)
     let obsQ = supabase
       .from('observations')
       .select('id, rubric_id, student_id, course_id, observed_at, note, kind')
@@ -61,34 +86,28 @@ export async function GET(req: Request) {
     if (obsErr) return NextResponse.json({ error: obsErr.message }, { status: 400 });
     if (!obs || obs.length === 0) return NextResponse.json({ items: [] });
 
-    // join thêm thông tin SV + rubric + course code/name
-    const obsIds    = Array.from(new Set(obs.map(o => o.id)));
-    const studentIds= Array.from(new Set(obs.map(o => o.student_id).filter(Boolean)));
-    const rubricIds = Array.from(new Set(obs.map(o => o.rubric_id).filter(Boolean)));
-    const courseIds = Array.from(new Set(obs.map(o => o.course_id).filter(Boolean)));
+    // join thêm thông tin SV + rubric + course
+    const studentIds = Array.from(new Set(obs.map(o => o.student_id).filter(Boolean)));
+    const rubricIds  = Array.from(new Set(obs.map(o => o.rubric_id).filter(Boolean)));
+    const courseIds  = Array.from(new Set(obs.map(o => o.course_id).filter(Boolean)));
 
     const [
       { data: students, error: stuErr },
       { data: rubrics,  error: rubErr },
       { data: courses,  error: crsErr },
-      { data: scored,   error: scrErr },
     ] = await Promise.all([
-      // QUAN TRỌNG: join theo students.id (không phải user_id)
+      // >>> FIX: join theo students.id (không phải user_id)
       supabase.from('students').select('id, user_id, mssv, full_name').in('id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000']),
       supabase.from('rubrics').select('id, title').in('id', rubricIds.length ? rubricIds : ['00000000-0000-0000-0000-000000000000']),
       supabase.from('courses').select('id, course_code').in('id', courseIds.length ? courseIds : ['00000000-0000-0000-0000-000000000000']),
-      // Dùng để suy ra status hiển thị: có item scores => xem là 'submitted'
-      supabase.from('observation_item_scores').select('observation_id').in('observation_id', obsIds.length ? obsIds : ['00000000-0000-0000-0000-000000000000']),
     ]);
     if (stuErr) return NextResponse.json({ error: stuErr.message }, { status: 400 });
     if (rubErr) return NextResponse.json({ error: rubErr.message }, { status: 400 });
     if (crsErr) return NextResponse.json({ error: crsErr.message }, { status: 400 });
-    if (scrErr) return NextResponse.json({ error: scrErr.message }, { status: 400 });
 
-    const stuMap = new Map((students || []).map(s => [s.id, s]));
+    const stuMap = new Map((students || []).map(s => [s.id, s]));  // <<< key = students.id
     const rubMap = new Map((rubrics  || []).map(r => [r.id, r]));
     const crsMap = new Map((courses  || []).map(c => [c.id, c]));
-    const submittedSet = new Set((scored || []).map((x: any) => x.observation_id));
 
     let items = (obs || []).map(o => {
       const st = stuMap.get(o.student_id);
@@ -98,8 +117,7 @@ export async function GET(req: Request) {
         id: o.id as string,
         created_at: o.observed_at ?? null,
         submitted_at: null,
-        // status hiển thị: có bất kỳ item_score thì xem như đã nộp
-        status: (submittedSet.has(o.id) ? 'submitted' : 'draft') as 'draft' | 'submitted',
+        status: (o.kind === 'submitted' ? 'submitted' : 'draft') as 'draft'|'submitted',
         course_code: cs?.course_code ?? null,
         framework_id: framework_id ?? null,
         student_user_id: st?.user_id ?? null,
@@ -131,31 +149,38 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = (await req.json().catch(() => ({}))) as {
-      id?: string;
+      id?: string;                      // nếu update
       rubric_id?: string;
-      student_user_id?: string;              // UI cũ
-      student_id?: string;                   // nếu gửi đúng id bảng students thì dùng field này
-      framework_id?: string | null;
-      course_code?: string | null;
-      status?: 'draft' | 'submitted';        // trạng thái UI
+      // các biến đầu vào tiềm năng từ UI:
+      student_id?: string | null;       // KHÓA CHÍNH của students (ưu tiên dùng)
+      student_user_id?: string | null;  // auth.users.id (nếu gửi cái này thì sẽ resolve)
+      student_mssv?: string | null;     // mssv (nếu gửi cái này cũng resolve)
+      framework_id?: string | null;     // để resolve course_id
+      course_code?: string | null;      // để resolve course_id
+      status?: 'draft' | 'submitted';
       overall_comment?: string | null;
       items?: Item[];
-      kind?: 'teacher' | 'eval360' | string; // optional, sẽ normalize
     };
 
     const id = body.id || undefined;
     const rubric_id = String(body.rubric_id || '');
-    // Ưu tiên student_id chuẩn; fallback sang student_user_id nếu bạn map như cũ
-    const student_id = (body.student_id || '').toString() || (body.student_user_id || '').toString();
-    const isSubmit = body.status === 'submitted';
-    const note = body.overall_comment ?? null;
-    const dbKind = normKind(body.kind); // <-- CHỐT: chỉ lưu 'teacher' hoặc 'eval360'
 
-    if (!rubric_id || !student_id) {
-      return NextResponse.json({ error: 'rubric_id, student_id là bắt buộc' }, { status: 400 });
+    // >>> FIX: chuẩn hóa về students.id
+    const student_pk = await resolveStudentPK(supabase, {
+      student_id: body.student_id ?? null,
+      student_user_id: body.student_user_id ?? null,
+      student_mssv: body.student_mssv ?? null,
+    });
+    if (!student_pk) {
+      return NextResponse.json({ error: 'Không tìm thấy sinh viên (students.id)' }, { status: 400 });
     }
 
-    // resolve course_id nếu có khung + mã học phần
+    const kind = (body.status === 'submitted' ? 'submitted' : 'draft') as 'submitted' | 'draft';
+    const note = body.overall_comment ?? null;
+
+    if (!rubric_id) return NextResponse.json({ error: 'rubric_id là bắt buộc' }, { status: 400 });
+
+    // resolve course_id nếu có filter khung + mã học phần
     let course_id: string | null = null;
     if (body.framework_id && body.course_code) {
       course_id = await resolveCourseId(supabase, body.framework_id, body.course_code);
@@ -164,11 +189,7 @@ export async function POST(req: Request) {
 
     // UPDATE
     if (id) {
-      const { data: own, error: chkErr } = await supabase
-        .from('observations')
-        .select('id')
-        .eq('id', id)
-        .maybeSingle();
+      const { data: own, error: chkErr } = await supabase.from('observations').select('id').eq('id', id).maybeSingle();
       if (chkErr) return NextResponse.json({ error: chkErr.message }, { status: 400 });
       if (!own)   return NextResponse.json({ error: 'Không có quyền cập nhật' }, { status: 403 });
 
@@ -176,20 +197,19 @@ export async function POST(req: Request) {
         .from('observations')
         .update({
           rubric_id,
-          student_id,
+          student_id: student_pk,       // <<< dùng PK hợp lệ
           course_id: course_id ?? null,
           rater_id: user.id,
-          kind: dbKind,                           // <-- không ghi 'draft/submitted'
+          kind,
           note,
           observed_at: new Date().toISOString(),
         })
         .eq('id', id)
         .select('*')
         .single();
-
       if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 });
 
-      // (tùy schema) ghi điểm các mục
+      // Item scores (nếu dùng bảng riêng; nếu schema bạn khác, có thể bỏ)
       if (Array.isArray(body.items)) {
         await supabase.from('observation_item_scores').delete().eq('observation_id', id);
         if (body.items.length) {
@@ -205,12 +225,11 @@ export async function POST(req: Request) {
         }
       }
 
-      if (isSubmit) {
+      if (kind === 'submitted') {
         const admin = createServiceClient();
         const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: id });
         if (rerr) return NextResponse.json({ error: `RPC compute_observation_clo_results: ${rerr.message}` }, { status: 400 });
       }
-
       return NextResponse.json({ observation: upd });
     }
 
@@ -219,16 +238,15 @@ export async function POST(req: Request) {
       .from('observations')
       .insert({
         rubric_id,
-        student_id,
+        student_id: student_pk,          // <<< dùng PK hợp lệ
         course_id: course_id ?? null,
         rater_id: user.id,
-        kind: dbKind,                             // <-- cố định 'teacher' (hoặc 'eval360')
+        kind,
         note,
         observed_at: new Date().toISOString(),
       })
       .select('*')
       .single();
-
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 
     if (Array.isArray(body.items) && body.items.length) {
@@ -243,7 +261,7 @@ export async function POST(req: Request) {
       if (sErr) return NextResponse.json({ error: sErr.message }, { status: 400 });
     }
 
-    if (isSubmit) {
+    if (kind === 'submitted') {
       const admin = createServiceClient();
       const { error: rerr } = await admin.rpc('compute_observation_clo_results', { p_observation_id: ins.id });
       if (rerr) return NextResponse.json({ error: `RPC compute_observation_clo_results: ${rerr.message}` }, { status: 400 });
