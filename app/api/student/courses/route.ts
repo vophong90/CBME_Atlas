@@ -1,4 +1,3 @@
-// app/api/student/courses/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -7,49 +6,47 @@ import { createServiceClient } from '@/lib/supabaseServer';
 
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
-    const studentId = url.searchParams.get('student_id') || '';
-    const explicitFw = url.searchParams.get('framework_id') || '';
-
     const db = createServiceClient();
+    const { searchParams } = new URL(req.url);
+    const student_id = searchParams.get('student_id');
+    const framework_id = searchParams.get('framework_id');
 
-    // 1) Xác định framework_id (ưu tiên query param, sau đó từ bảng students)
-    let frameworkId = explicitFw;
-    if (!frameworkId && studentId) {
-      const { data: stu, error: eStu } = await db
+    let fw = framework_id;
+
+    if (!fw && student_id) {
+      const { data: st, error: e1 } = await db
         .from('students')
         .select('framework_id')
-        .eq('id', studentId)
+        .eq('id', student_id)
         .maybeSingle();
-      if (eStu) throw eStu;
-      frameworkId = stu?.framework_id || '';
+      if (e1) return NextResponse.json({ error: e1.message }, { status: 400 });
+      fw = st?.framework_id ?? null;
     }
 
-    // 2) Lấy courses + thông tin bộ môn (departments)
-    let q = db
+    if (!fw) return NextResponse.json({ items: [] });
+
+    const { data, error } = await db
       .from('courses')
-      .select('course_code, course_name, department:departments(id, name)')
-      .order('course_code', { ascending: true });
+      .select(`
+        framework_id,
+        course_code,
+        course_name,
+        department_id,
+        departments:department_id ( id, name )
+      `)
+      .eq('framework_id', fw)
+      .order('course_code');
 
-    if (frameworkId) q = q.eq('framework_id', frameworkId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-    const { data, error } = await q;
-    if (error) throw error;
-
-    // 3) Map về shape mà trang Feedback đang dùng
-    const items = (data ?? []).map((r: any) => ({
+    const items = (data || []).map((r) => ({
       code: r.course_code,
-      name: r.course_name ?? null,
-      department: r.department
-        ? { id: r.department.id, name: r.department.name }
-        : null,
+      name: r.course_name,
+      department: r.departments ? { id: r.departments.id, name: r.departments.name } : null,
     }));
 
-    return NextResponse.json({ items }, { status: 200 });
+    return NextResponse.json({ items });
   } catch (e: any) {
-    return NextResponse.json(
-      { items: [], error: e?.message || 'Server error' },
-      { status: 200 }
-    );
+    return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
   }
 }
