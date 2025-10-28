@@ -35,9 +35,17 @@ const UsersIcon = (p: any) => (
     <path d="M22 20a5 5 0 00-7-4" strokeWidth="1.75" strokeLinecap="round" />
   </svg>
 );
+/* NEW: icon cho Quản lý học phần */
+const BookIcon = (p: any) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" strokeWidth="1.75" />
+    <path d="M4 4v15.5A2.5 2.5 0 0 1 6.5 22H20V6a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 6.5z" strokeWidth="1.75" />
+  </svg>
+);
 
 const NAV = [
   { href: '/academic-affairs/framework', label: 'Khung CTĐT & Ma trận', Icon: LayersIcon },
+  { href: '/academic-affairs/courses',   label: 'Quản lý học phần',     Icon: BookIcon   }, // <— thêm tab mới
   { href: '/academic-affairs/students',  label: 'Tài khoản sinh viên',  Icon: UsersIcon  },
 ];
 
