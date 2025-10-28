@@ -1,64 +1,76 @@
-// app/360-eval/layout.tsx
 'use client';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-/* ===== Inline icons (no deps) ===== */
-const MenuIcon = (p: any) => (
+/** ========= Inline icons (no deps) ========= */
+type IconProps = React.SVGProps<SVGSVGElement>;
+const MenuIcon = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path strokeWidth="1.75" strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" />
+    <path strokeWidth={1.75} strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" />
   </svg>
 );
-const ChevronLeft = (p: any) => (
+const ChevronLeft = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M15 6l-6 6 6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M15 6l-6 6 6 6" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-const ChevronRight = (p: any) => (
+const ChevronRight = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M9 6l6 6-6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M9 6l6 6-6 6" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-const ClipboardCheck = (p: any) => (
+const CheckClipboard = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <rect x="6" y="4" width="12" height="16" rx="2" strokeWidth="1.75" />
-    <path d="M9 4h6v3H9z" strokeWidth="1.75" />
-    <path d="M8 11h5" strokeWidth="1.75" />
-    <path d="M8 15h8" strokeWidth="1.75" />
-    <path d="M14 10l2 2 3-3" strokeWidth="1.75" />
+    <rect x="6" y="4" width="12" height="16" rx="2" strokeWidth={1.75}/>
+    <path d="M9 4h6v3H9z" strokeWidth={1.75}/>
+    <path d="M8 11h5" strokeWidth={1.75}/>
+    <path d="M8 15h8" strokeWidth={1.75}/>
+    <path d="M14 10l2 2 3-3" strokeWidth={1.75}/>
   </svg>
 );
-const WrenchIcon = (p: any) => (
+const FormsIcon = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M14.7 6.3a4.5 4.5 0 0 0-6.36 6.36l-5.34 5.34a1.5 1.5 0 0 0 2.12 2.12l5.34-5.34a4.5 4.5 0 0 0 6.36-6.36l-1.06 1.06a3 3 0 1 1-4.24-4.24L14.7 6.3z" strokeWidth="1.75"/>
+    <rect x="4" y="3" width="16" height="18" rx="2" strokeWidth={1.75}/>
+    <path d="M8 7h8M8 11h8M8 15h5" strokeWidth={1.75} strokeLinecap="round"/>
   </svg>
 );
-const BarIcon = (p: any) => (
+const ResultsIcon = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M3 20h18" strokeWidth="1.75" strokeLinecap="round" />
-    <rect x="6" y="10" width="3" height="8" rx="1" strokeWidth="1.75" />
-    <rect x="11" y="6" width="3" height="12" rx="1" strokeWidth="1.75" />
-    <rect x="16" y="12" width="3" height="6" rx="1" strokeWidth="1.75" />
+    <path d="M3 20h18" strokeWidth={1.75} strokeLinecap="round"/>
+    <rect x="6" y="10" width="3" height="8" rx="1" strokeWidth={1.75}/>
+    <rect x="11" y="6" width="3" height="12" rx="1" strokeWidth={1.75}/>
+    <rect x="16" y="12" width="3" height="6" rx="1" strokeWidth={1.75}/>
   </svg>
 );
 
-/* ===== Roles helper: QA tabs chỉ hiện khi user có role phù hợp ===== */
-type MeResp = { user?: { id: string; email?: string; name?: string | null } | null; roles?: string[] | null };
-const CAN_SEE_QA = (roles?: string[] | null) => {
-  if (!roles) return false;
-  const allow = ['qa', 'admin', 'academic_affairs', 'secretary'];
-  return roles.some(r => allow.includes(r));
+/** ========= Auth / role helpers ========= */
+type MeResp = {
+  user?: { id: string; email?: string | null; name?: string | null } | null;
+  roles?: string[] | null;
+  profile?: { role?: string | null } | null;
 };
 
+const canSeeQA = (me?: MeResp | null) => {
+  const allow = new Set(['admin', 'qa', 'academic_affairs', 'secretary']);
+  const roles = [
+    ...(me?.roles || []),
+    me?.profile?.role || '',
+  ]
+    .filter(Boolean)
+    .map((r) => String(r).toLowerCase());
+  return roles.some((r) => allow.has(r));
+};
+
+/** ========= Shell layout ========= */
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [me, setMe] = useState<MeResp | null>(null);
 
-  // restore sidebar state
+  // Restore / persist sidebar state
   useEffect(() => {
     try {
       const s = localStorage.getItem('eval360SidebarCollapsed');
@@ -71,26 +83,33 @@ function Shell({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [collapsed]);
 
-  // fetch current user + roles (graceful fallback)
+  // Fetch current user/roles to decide which tabs to show
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/auth/me', { credentials: 'include' });
-        const d = await r.json().catch(() => ({}));
-        setMe(d || {});
+        const d = await r.json();
+        setMe(d || null);
       } catch {
         setMe(null);
       }
     })();
   }, []);
 
-  const showQA = CAN_SEE_QA(me?.roles);
+  const showQA = useMemo(() => canSeeQA(me), [me]);
 
-  const NAV = [
-    { href: '/360-eval/evaluate', label: 'Thực hiện đánh giá', Icon: ClipboardCheck, show: true },
-    { href: '/360-eval/forms',    label: 'Quản lý biểu mẫu',   Icon: WrenchIcon,    show: showQA },
-    { href: '/360-eval/results',  label: 'Kết quả theo MSSV',  Icon: BarIcon,       show: showQA },
-  ].filter(i => i.show);
+  const NAV = useMemo(() => {
+    const arr = [
+      { href: '/360-eval/evaluate', label: 'Thực hiện đánh giá', Icon: CheckClipboard },
+    ] as Array<{ href: string; label: string; Icon: (p: IconProps) => JSX.Element }>;
+    if (showQA) {
+      arr.push(
+        { href: '/360-eval/forms',   label: 'Quản lý biểu mẫu',  Icon: FormsIcon   },
+        { href: '/360-eval/results', label: 'Kết quả theo MSSV', Icon: ResultsIcon },
+      );
+    }
+    return arr;
+  }, [showQA]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-white text-slate-900">
@@ -106,21 +125,19 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* Sidebar (desktop) */}
         <aside
           className={[
-            'hidden md:flex md:sticky md:top-0 md:h-[100dvh] md:flex-col md:border-r md:border-slate-200 md:bg-white',
+            'hidden md:sticky md:top-0 md:h-[100dvh] md:flex md:flex-col md:border-r md:border-slate-200 md:bg-white',
             collapsed ? 'md:w-16' : 'md:w-72',
           ].join(' ')}
         >
           <div className="flex items-center justify-between gap-2 p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">360</div>
-            {!collapsed && (
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">Đánh giá 360°</div>
-                <div className="truncate text-xs text-slate-500">
-                  {me?.user?.name || me?.user?.email || 'Khách'}
-                </div>
-              </div>
-            )}
-            <button onClick={() => setCollapsed(v => !v)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">
+              360
+            </div>
+            {!collapsed && <div className="text-sm font-semibold">Multi-source Evaluation</div>}
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50"
+            >
               {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
@@ -157,14 +174,20 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* Mobile Drawer */}
         {mobileOpen && (
           <>
-            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
+            <div
+              className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden"
+              onClick={() => setMobileOpen(false)}
+            />
             <aside className="fixed left-0 top-0 z-50 h-full w-72 overflow-y-auto border-r border-slate-200 bg-white md:hidden">
               <div className="flex items-center justify-between gap-2 p-3">
                 <div className="flex items-center gap-2">
                   <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">360</div>
-                  <div className="text-sm font-semibold">Đánh giá 360°</div>
+                  <div className="text-sm font-semibold">Multi-source Evaluation</div>
                 </div>
-                <button onClick={() => setMobileOpen(false)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
+                <button
+                  onClick={() => setMobileOpen(false)}
+                  className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50"
+                >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
               </div>
@@ -193,6 +216,20 @@ function Shell({ children }: { children: React.ReactNode }) {
 
         {/* Main */}
         <main className="flex-1 p-6">
+          {/* Header card (giữ đồng bộ với layout khác) */}
+          <div className="mb-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-semibold">Đánh giá 360°</h1>
+                  <p className="text-sm text-slate-600">
+                    Thực hiện đánh giá đa nguồn; QA quản lý biểu mẫu và tra cứu kết quả theo MSSV.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {children}
         </main>
       </div>
