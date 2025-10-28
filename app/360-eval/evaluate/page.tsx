@@ -17,8 +17,8 @@ type StudentOpt = { user_id: string; label: string };
 
 export default function Eval360DoPage() {
   const { profile } = useAuth();
-  const selfUserId = profile?.id ?? null;
-  const selfName   = profile?.name ?? profile?.email ?? 'Tôi';
+  const selfUserId = (profile as any)?.user_id ?? (profile as any)?.id ?? null;
+  const selfName = profile?.name ?? (profile as any)?.email ?? 'Tôi';
 
   const [group, setGroup] = useState<GroupCode>('peer');
 
