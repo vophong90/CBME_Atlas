@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { getSupabase } from '@/lib/supabase-browser';
 
-/* inline icons (no deps) */
+/* ===== Inline icons (no deps) ===== */
 const MenuIcon = (p: any) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
     <path strokeWidth="1.75" strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" />
@@ -20,8 +21,6 @@ const ChevronRight = (p: any) => (
     <path d="M9 6l6 6-6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-
-/* Simple inline icons */
 const ClipboardCheck = (p: any) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
     <rect x="6" y="4" width="12" height="16" rx="2" />
@@ -45,7 +44,8 @@ const MessageSquare = (p: any) => (
 );
 const InboxIcon = (p: any) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M4 4h16l-2 10h-4l-2 3-2-3H6L4 4z" />
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 13h4l2 3h6l2-3h4" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -56,10 +56,22 @@ const NAV = [
   { href: '/teacher/inbox',    label: 'Hộp thư góp ý', desc: 'Ẩn danh từ SV', Icon: InboxIcon },
 ];
 
+function getInitials(name?: string) {
+  if (!name) return 'GV';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Thông tin GV
+  const [teacherName, setTeacherName] = useState<string>('');
+  const [deptName, setDeptName] = useState<string>('');
+  const initials = useMemo(() => getInitials(teacherName), [teacherName]);
 
   useEffect(() => {
     try {
@@ -73,6 +85,35 @@ function Shell({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [collapsed]);
 
+  // Lấy tên GV + bộ môn từ bảng staff (join departments)
+  useEffect(() => {
+    (async () => {
+      try {
+        const sb = getSupabase();
+        const { data: userRes } = await sb.auth.getUser();
+        const uid = userRes?.user?.id;
+        if (!uid) return;
+
+        const { data, error } = await sb
+          .from('staff')
+          .select('full_name, departments ( name )')
+          .eq('user_id', uid)
+          .maybeSingle();
+
+        if (!error && data) {
+          setTeacherName((data as any)?.full_name || 'Giảng viên');
+          setDeptName((data as any)?.departments?.name || '');
+          return;
+        }
+
+        // Fallback nếu chưa có record staff
+        setTeacherName(userRes?.user?.user_metadata?.full_name || userRes?.user?.email || 'Giảng viên');
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-white text-slate-900">
       {/* Topbar (mobile) */}
@@ -80,7 +121,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <button onClick={() => setMobileOpen(true)} className="rounded-lg border border-slate-200 p-2 active:scale-95">
           <MenuIcon className="h-5 w-5" />
         </button>
-        <div className="text-base font-semibold">Giảng viên</div>
+        <div className="text-base font-semibold">{teacherName || 'Giảng viên'}{deptName ? ` · ${deptName}` : ''}</div>
       </div>
 
       <div className="mx-auto flex max-w-[1400px]">
@@ -92,8 +133,15 @@ function Shell({ children }: { children: React.ReactNode }) {
           ].join(' ')}
         >
           <div className="flex items-center justify-between gap-2 p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">GV</div>
-            {!collapsed && <div className="text-sm font-semibold">Khu vực giảng viên</div>}
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">
+              {initials}
+            </div>
+            {!collapsed && (
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{teacherName || 'Giảng viên'}</div>
+                <div className="truncate text-xs text-slate-500">{deptName || 'Khu vực giảng viên'}</div>
+              </div>
+            )}
             <button onClick={() => setCollapsed((v) => !v)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
               {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
@@ -137,8 +185,8 @@ function Shell({ children }: { children: React.ReactNode }) {
             <aside className="fixed left-0 top-0 z-50 h-full w-72 overflow-y-auto border-r border-slate-200 bg-white md:hidden">
               <div className="flex items-center justify-between gap-2 p-3">
                 <div className="flex items-center gap-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">GV</div>
-                  <div className="text-sm font-semibold">Khu vực giảng viên</div>
+                  <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">{initials}</div>
+                  <div className="text-sm font-semibold">{teacherName || 'Giảng viên'}</div>
                 </div>
                 <button onClick={() => setMobileOpen(false)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
                   <ChevronLeft className="h-4 w-4" />
@@ -173,8 +221,12 @@ function Shell({ children }: { children: React.ReactNode }) {
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl font-semibold">Giảng viên</h1>
-                  <p className="text-sm text-slate-600">Chấm đánh giá, tra cứu sinh viên, nhận góp ý.</p>
+                  <h1 className="text-2xl font-semibold">
+                    Giảng viên <span className="text-brand-700">• {teacherName || '—'}</span>
+                  </h1>
+                  <p className="text-sm text-slate-600">
+                    Chấm đánh giá, tra cứu sinh viên, phản hồi đến SV. {deptName ? `(${deptName})` : ''}
+                  </p>
                 </div>
               </div>
             </div>
