@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import TopNav from '../components/TopNav';
+import AuthProvider from '../components/AuthProvider'; // <— thêm
 import { Inter } from 'next/font/google';
 
 const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-sans' });
@@ -45,17 +46,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      {/* CSS var --brand giúp dùng màu thương hiệu đồng nhất cả khi chưa cấu hình tailwind theme */}
       <body className="font-sans antialiased text-slate-900" style={{ ['--brand' as any]: '#0E7BD0' }}>
         <div className="relative min-h-screen bg-[radial-gradient(1200px_600px_at_-20%_-10%,rgba(14,123,208,0.06),transparent_60%),radial-gradient(1200px_600px_at_120%_-10%,rgba(43,174,114,0.06),transparent_60%),linear-gradient(180deg,#ffffff_0%,#f7fafc_100%)]">
-          <TopNav />
-          <main className="mx-auto max-w-7xl px-4 md:px-6">{children}</main>
+          {/* Bọc toàn app với AuthProvider để TopNav “nghe” auth state */}
+          <AuthProvider>
+            <TopNav />
+            <main className="mx-auto max-w-7xl px-4 md:px-6">{children}</main>
+          </AuthProvider>
 
-          {/* Footer tinh gọn */}
+          {/* Footer: bỏ “Tài liệu / Bảo mật / Đăng nhập” */}
           <footer className="mt-24 border-t bg-white/70 backdrop-blur">
-            <div className="mx-auto max-w-7xl px-4 md:px-6 py-8 text-sm text-slate-600 flex items-center justify-between">
+            <div className="mx-auto max-w-7xl px-4 md:px-6 py-8 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-4">
               <div>© {new Date().getFullYear()} Khoa Y học Cổ truyền – ĐHYD TP.HCM</div>
-              <div className="text-slate-500">CBME Atlas</div>
+              <div /> {/* để trống hoặc đặt nội dung khác sau */}
             </div>
           </footer>
         </div>
