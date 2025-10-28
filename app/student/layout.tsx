@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Home,
   Flag,
   Target,
   MessageSquare,
@@ -20,12 +19,12 @@ type NavItem = {
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 };
 
+// Bỏ tab “Tổng quan” như yêu cầu
 const NAV_ITEMS: NavItem[] = [
-  { href: '/student',           label: 'Tổng quan', icon: Home },
-  { href: '/student/plo',       label: 'PLO',       icon: Flag },
-  { href: '/student/pi',        label: 'PI',        icon: Target },
-  { href: '/student/feedback',  label: 'Góp ý',     icon: MessageSquare },
-  { href: '/student/surveys',   label: 'Khảo sát',  icon: ClipboardList },
+  { href: '/student/plo',      label: 'PLO',      icon: Flag },
+  { href: '/student/pi',       label: 'PI',       icon: Target },
+  { href: '/student/feedback', label: 'Góp ý',    icon: MessageSquare },
+  { href: '/student/surveys',  label: 'Khảo sát', icon: ClipboardList },
 ];
 
 function Sidebar({ collapsed }: { collapsed: boolean }) {
@@ -34,7 +33,8 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   return (
     <aside
       className={[
-        'hidden md:flex h-screen shrink-0 flex-col border-r border-slate-200 bg-white/95 backdrop-blur',
+        // Đồng bộ cảm giác với layout Giảng viên: nền trắng mờ + blur + viền
+        'hidden md:flex h-[calc(100vh-0px)] shrink-0 flex-col border-r border-slate-200 bg-white/70 backdrop-blur',
         collapsed ? 'w-16' : 'w-64',
         'sticky top-0 z-30',
       ].join(' ')}
@@ -87,6 +87,7 @@ function Topbar({
   const { studentId, fullName, mssv, loading } = useStudentCtx();
 
   return (
+    // Đồng bộ với Giảng viên: thanh topbar trắng mờ + blur + viền dưới
     <div className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/85 px-4 backdrop-blur md:px-6">
       <div className="flex items-center gap-3">
         <button
@@ -123,7 +124,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   return (
     <StudentProvider>
-      <div className="min-h-screen bg-slate-50 md:flex">
+      {/* Không đặt nền riêng (giữ gradient nền từ layout gốc Giảng viên) */}
+      <div className="md:flex min-h-screen">
         {/* Sidebar (desktop) */}
         <Sidebar collapsed={collapsed} />
 
@@ -132,10 +134,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           {/* Topbar */}
           <Topbar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
 
-          {/* Content */}
-          <main className={['mx-auto w-full max-w-7xl p-4 md:p-6', collapsed ? '' : ''].join(' ')}>
+          {/* Content: dùng cùng max-width & padding như layout Giảng viên */}
+          <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-4 md:py-6">
             {children}
-          </main>
+          </div>
         </div>
       </div>
     </StudentProvider>
