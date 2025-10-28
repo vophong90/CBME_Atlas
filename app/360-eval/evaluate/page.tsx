@@ -15,46 +15,144 @@ type Rubric = {
 
 type StudentOpt = { user_id: string; label: string };
 
+// =============== Combobox async (inline, no deps) ===============
+function AsyncStudentCombobox({
+  value,
+  onChange,
+  disabled,
+  placeholder = 'Nhập MSSV hoặc tên để tìm…',
+}: {
+  value: string | null;
+  onChange: (val: { user_id: string; label: string } | null) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [opts, setOpts] = useState<StudentOpt[]>([]);
+  const [selectedLabel, setSelectedLabel] = useState('');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    window.addEventListener('mousedown', onClickOutside);
+    return () => window.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  // fetch theo q (debounce)
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(async () => {
+      if (!q.trim()) { setOpts([]); return; }
+      try {
+        setLoading(true);
+        const r = await fetch(`/api/360/students?q=${encodeURIComponent(q.trim())}`);
+        const d = await r.json();
+        const items: StudentOpt[] = (d.items || []).map((x: any) => ({ user_id: x.user_id, label: x.label }));
+        setOpts(items);
+      } catch {
+        setOpts([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, open]);
+
+  useEffect(() => {
+    // nếu có value mà chưa có selectedLabel, cố tìm trong opts; nếu không, giữ nguyên
+    if (!value) { setSelectedLabel(''); return; }
+    const match = opts.find(o => o.user_id === value);
+    if (match) setSelectedLabel(match.label);
+  }, [value, opts]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        className="mt-1 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-60"
+      >
+        <span className={selectedLabel ? '' : 'text-slate-400'}>
+          {selectedLabel || placeholder}
+        </span>
+        <svg className="ml-2 h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M6 9l6 6 6-6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && !disabled && (
+        <div className="absolute z-20 mt-1 w-full rounded-lg border bg-white shadow">
+          <div className="p-2">
+            <input
+              value={q}
+              onChange={(e)=>setQ(e.target.value)}
+              autoFocus
+              placeholder="Tìm nhanh theo MSSV/họ tên…"
+              className="w-full rounded-md border px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div className="max-h-64 overflow-auto border-t">
+            {loading && <div className="px-3 py-2 text-sm text-slate-500">Đang tìm…</div>}
+            {!loading && opts.length === 0 && <div className="px-3 py-2 text-sm text-slate-500">Không có kết quả</div>}
+            {!loading && opts.map(o => (
+              <button
+                key={o.user_id}
+                onClick={() => { onChange(o); setSelectedLabel(o.label); setOpen(false); }}
+                className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${value===o.user_id?'bg-slate-100':''}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {value && (
+            <div className="border-t p-2">
+              <button
+                onClick={() => { onChange(null); setSelectedLabel(''); setQ(''); }}
+                className="text-xs text-red-600 hover:underline"
+              >
+                Xóa lựa chọn
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== Page ====================
 export default function Eval360DoPage() {
   const { profile } = useAuth();
-  const selfUserId = (profile as any)?.user_id ?? (profile as any)?.id ?? null;
-  const selfName = profile?.name ?? (profile as any)?.email ?? 'Tôi';
+  const selfUserId = (profile as any)?.user_id ?? null;
+  const selfName   = profile?.name ?? (profile as any)?.email ?? 'Tôi';
 
   const [group, setGroup] = useState<GroupCode>('peer');
+  const [evaluatee, setEvaluatee] = useState<{ user_id: string; label: string } | null>(null);
 
-  // ==== Combobox state ====
-  const [inputValue, setInputValue] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [highlight, setHighlight] = useState<number>(-1);
-  const [loadingSV, setLoadingSV] = useState(false);
-
-  const [students, setStudents] = useState<StudentOpt[]>([]);
-  const [evaluatee, setEvaluatee] = useState<string>(''); // user_id được chọn
-  const inputRef = useRef<HTMLInputElement|null>(null);
-  const listRef  = useRef<HTMLDivElement|null>(null);
-
-  // ==== Forms / rubric ====
   const [forms, setForms] = useState<Array<{ id: string; title: string; rubric_id: string }>>([]);
   const [rubricId, setRubricId] = useState('');
   const [rubric, setRubric] = useState<Rubric | null>(null);
+
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [comment, setComment] = useState('');
-  const [loadingSubmit, setLoadingSubmit] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // ====== Helper: đóng dropdown khi click ra ngoài ======
+  // Khi chọn "self": auto set evaluatee = chính mình, khóa combobox
   useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!dropdownOpen) return;
-      const t = e.target as Node;
-      if (inputRef.current?.contains(t)) return;
-      if (listRef.current?.contains(t)) return;
-      setDropdownOpen(false);
+    if (group === 'self' && selfUserId) {
+      setEvaluatee({ user_id: selfUserId, label: `${selfName} (Tự đánh giá)` });
+    } else {
+      setEvaluatee(null);
     }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [dropdownOpen]);
+  }, [group, selfUserId, selfName]);
 
-  // ====== Nạp forms theo group ======
+  // nạp biểu mẫu theo group
   useEffect(() => {
     (async () => {
       const r = await fetch(`/api/360/forms?group_code=${group}&status=active`);
@@ -62,105 +160,60 @@ export default function Eval360DoPage() {
       setForms((d.items || []).map((x: any) => ({ id: x.id, title: x.title, rubric_id: x.rubric_id })));
       setRubricId('');
       setRubric(null);
+      setAnswers({});
     })();
   }, [group]);
 
-  // ====== Tìm SV (debounce) ======
-  useEffect(() => {
-    if (group === 'self') return; // self: khóa theo chính mình
-    const q = inputValue.trim();
-    if (!q) { setStudents([]); return; }
-    setLoadingSV(true);
-    const t = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/360/students?q=${encodeURIComponent(q)}`);
-        const d = await r.json();
-        setStudents((d.items || []) as StudentOpt[]);
-        setHighlight((d.items || []).length ? 0 : -1);
-      } catch {
-        setStudents([]);
-        setHighlight(-1);
-      } finally {
-        setLoadingSV(false);
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [inputValue, group]);
-
-  // ====== “Self” → tự gán evaluatee = current user, khóa input ======
-  useEffect(() => {
-    if (group === 'self') {
-      if (selfUserId) {
-        setEvaluatee(selfUserId);
-        setInputValue(selfName);
-      } else {
-        // nếu chưa có profile trong context, cứ giữ trống để người dùng chọn tay
-        setEvaluatee('');
-        setInputValue('');
-      }
-      setDropdownOpen(false);
-    } else {
-      // rời khỏi self → reset
-      setEvaluatee('');
-      setInputValue('');
-      setStudents([]);
-    }
-  }, [group, selfUserId, selfName]);
-
-  // ====== Lấy rubric.definition theo rubricId (thử nhiều endpoint để tương thích app cũ) ======
+  // nạp nội dung rubric khi chọn biểu mẫu
   async function loadRubricDef(id: string) {
-    const urls = [
+    // Ưu tiên endpoint nội bộ nếu bạn đã tạo
+    const tryUrls = [
       `/api/_internal/rubric?id=${id}`,
+      `/api/_raw/rubric?id=${id}`,
       `/api/rubrics/get?id=${id}`,
-      `/api/rubrics/detail?id=${id}`,
     ];
-    for (const u of urls) {
+    for (const u of tryUrls) {
       try {
         const r = await fetch(u);
         if (!r.ok) continue;
         const d = await r.json();
-        const ru: Rubric | null =
-          d?.rubric ??
-          d?.data ??
-          (d?.item && d?.item.definition ? d.item : null);
-        if (ru?.definition?.rows && ru?.definition?.columns) {
-          setRubric(ru);
+        // chấp nhận d.rubric hoặc d.data hoặc d.item
+        const rb: Rubric | null = d.rubric || d.data || d.item || null;
+        if (rb?.definition?.rows && rb?.definition?.columns) {
+          setRubric(rb);
           setAnswers({});
           return;
         }
-      } catch {
-        // thử endpoint tiếp theo
-      }
+      } catch { /* next */ }
     }
-    // Nếu đến đây vẫn không lấy được:
-    setRubric(null);
-    console.warn('Không tải được rubric.definition cho id=', id);
+    alert('Không tải được rubric.definition');
   }
 
-  // Khi chọn form → tải rubric
   useEffect(() => {
     if (!rubricId) return;
     loadRubricDef(rubricId);
   }, [rubricId]);
 
-  // ====== Submit ======
   const canSubmit = useMemo(() => {
-    const okRows = rubric?.definition?.rows?.length || 0;
-    return !!evaluatee && !!rubric && Object.keys(answers).length >= okRows;
+    return !!evaluatee?.user_id && !!rubric && Object.keys(answers).length >= (rubric?.definition?.rows?.length || 0);
   }, [evaluatee, rubric, answers]);
 
   async function handleSubmit() {
-    if (!rubric || !evaluatee) return;
+    if (!rubric || !evaluatee?.user_id) return;
     try {
-      setLoadingSubmit(true);
-      // 1) tạo evaluation_request ad-hoc cho phiên đánh giá này
+      setLoading(true);
+      // 1) tạo evaluation_request ad-hoc
       const st = await fetch('/api/360/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ evaluatee_user_id: evaluatee, rubric_id: rubric.id, group_code: group })
+        body: JSON.stringify({
+          evaluatee_user_id: evaluatee.user_id,
+          rubric_id: rubric.id,
+          group_code: group
+        })
       });
       const sd = await st.json();
-      if (!st.ok) throw new Error(sd?.error || 'Không tạo được yêu cầu đánh giá');
+      if (!st.ok) throw new Error(sd?.error || 'Không tạo được request');
 
       // 2) submit điểm
       const items = rubric.definition.rows.map((row) => ({
@@ -186,62 +239,25 @@ export default function Eval360DoPage() {
       alert('Đã nộp đánh giá 360° thành công!');
       setAnswers({});
       setComment('');
-      if (group !== 'self') { setEvaluatee(''); setInputValue(''); }
+      if (group !== 'self') setEvaluatee(null);
     } catch (e: any) {
       alert(e?.message || 'Lỗi gửi đánh giá');
     } finally {
-      setLoadingSubmit(false);
+      setLoading(false);
     }
-  }
-
-  // ====== Combobox handlers ======
-  function onFocusInput() {
-    if (group === 'self') return;
-    setDropdownOpen(true);
-  }
-  function onKeyDownInput(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!dropdownOpen) return;
-    if (!students.length) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setHighlight(h => Math.min(students.length - 1, h + 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlight(h => Math.max(0, h - 1));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (highlight >= 0 && highlight < students.length) {
-        const s = students[highlight];
-        onPickStudent(s);
-      }
-    } else if (e.key === 'Escape') {
-      setDropdownOpen(false);
-    }
-  }
-  function onPickStudent(s: StudentOpt) {
-    setEvaluatee(s.user_id);
-    setInputValue(s.label);
-    setDropdownOpen(false);
-  }
-  function onClearStudent() {
-    setEvaluatee('');
-    setInputValue('');
-    setStudents([]);
-    setHighlight(-1);
-    inputRef.current?.focus();
   }
 
   return (
     <div className="space-y-4">
       {/* Chọn đối tượng & SV */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-xl border bg-white p-4">
         <div className="grid gap-4 md:grid-cols-3">
           <div>
             <label className="text-xs font-semibold">Bạn là</label>
             <select
               value={group}
               onChange={(e)=>setGroup(e.target.value as GroupCode)}
-              className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
             >
               <option value="faculty">Giảng viên</option>
               <option value="peer">Sinh viên đánh giá nhau</option>
@@ -251,89 +267,25 @@ export default function Eval360DoPage() {
             </select>
           </div>
 
-          {/* Combobox chọn SV */}
           <div className="md:col-span-2">
             <label className="text-xs font-semibold">Chọn sinh viên</label>
-            <div className="relative mt-1">
-              <input
-                ref={inputRef}
-                value={inputValue}
-                onChange={(e)=>{ setInputValue(e.target.value); setEvaluatee(''); setDropdownOpen(true); }}
-                onFocus={onFocusInput}
-                onKeyDown={onKeyDownInput}
-                placeholder={group==='self' ? 'Bạn đang tự đánh giá' : 'Nhập MSSV hoặc tên để tìm…'}
-                disabled={group==='self'}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-20 text-sm outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-slate-100"
-                aria-autocomplete="list"
-                aria-expanded={dropdownOpen}
-                aria-controls="sv-combobox-list"
-                role="combobox"
-              />
-              {/* Clear + loading */}
-              <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-2">
-                {loadingSV && group!=='self' && (
-                  <span className="pointer-events-auto animate-spin rounded-full border-2 border-slate-300 border-t-transparent p-2" />
-                )}
-              </div>
-              {evaluatee && group!=='self' && (
-                <button
-                  type="button"
-                  onClick={onClearStudent}
-                  className="absolute inset-y-0 right-2 my-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
-                  aria-label="Xóa lựa chọn"
-                >
-                  Xóa
-                </button>
-              )}
-
-              {/* Dropdown */}
-              {dropdownOpen && group!=='self' && (
-                <div
-                  ref={listRef}
-                  id="sv-combobox-list"
-                  role="listbox"
-                  className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg"
-                >
-                  {!students.length && (
-                    <div className="px-3 py-2 text-sm text-slate-500">
-                      {inputValue.trim() ? 'Không tìm thấy. Hãy thử cụ thể hơn.' : 'Nhập MSSV hoặc tên để tìm.'}
-                    </div>
-                  )}
-                  {students.map((s, idx) => (
-                    <button
-                      key={s.user_id}
-                      role="option"
-                      aria-selected={evaluatee===s.user_id}
-                      onMouseEnter={()=>setHighlight(idx)}
-                      onClick={()=>onPickStudent(s)}
-                      className={[
-                        'block w-full px-3 py-2 text-left text-sm',
-                        idx===highlight ? 'bg-brand-50' : 'hover:bg-slate-50',
-                        evaluatee===s.user_id ? 'bg-slate-100' : '',
-                      ].join(' ')}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {evaluatee && (
-              <div className="mt-1 text-xs text-slate-500">
-                Đang chọn: <span className="font-medium">{inputValue}</span>
-              </div>
-            )}
+            <AsyncStudentCombobox
+              value={evaluatee?.user_id ?? null}
+              onChange={(v)=>setEvaluatee(v)}
+              disabled={group === 'self'}
+              placeholder={group === 'self' ? 'Tự đánh giá: hệ thống tự chọn bạn' : 'Nhập MSSV hoặc tên để tìm…'}
+            />
           </div>
         </div>
       </div>
 
       {/* Chọn biểu mẫu */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-xl border bg-white p-4">
         <label className="text-xs font-semibold">Chọn biểu mẫu</label>
         <select
           value={rubricId}
           onChange={(e)=>setRubricId(e.target.value)}
-          className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
+          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
         >
           <option value="">— Chọn —</option>
           {forms.map(f => (
@@ -344,7 +296,7 @@ export default function Eval360DoPage() {
 
       {/* Render rubric */}
       {rubric && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-xl border bg-white p-4">
           <div className="mb-3 font-semibold">{rubric.title}</div>
           <div className="overflow-auto">
             <table className="min-w-[640px] w-full text-sm">
@@ -381,7 +333,7 @@ export default function Eval360DoPage() {
             <textarea
               value={comment}
               onChange={(e)=>setComment(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-300"
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
               rows={3}
               placeholder="Những điểm mạnh & cần cải thiện…"
             />
@@ -389,11 +341,11 @@ export default function Eval360DoPage() {
 
           <div className="mt-4 flex gap-2">
             <button
-              disabled={!canSubmit || loadingSubmit}
+              disabled={!canSubmit || loading}
               onClick={handleSubmit}
-              className="rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-50"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-white disabled:opacity-50"
             >
-              {loadingSubmit ? 'Đang gửi…' : 'Nộp đánh giá'}
+              {loading ? 'Đang gửi…' : 'Nộp đánh giá'}
             </button>
           </div>
         </div>
