@@ -1,53 +1,76 @@
-import { NextResponse } from 'next/server';
-import { getSupabase } from '@/lib/supabaseServer';
-
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** GET ?request_id= */
+import { NextResponse } from 'next/server';
+import { getSupabaseFromRequest } from '@/lib/supabaseServer';
+
 export async function GET(req: Request) {
-  const supabase = getSupabase();
+  const sb = getSupabaseFromRequest(req);
   const url = new URL(req.url);
-  const request_id = Number(url.searchParams.get('request_id'));
-  if (!request_id) return NextResponse.json({ error: 'request_id required' }, { status: 400 });
+  const group_code = url.searchParams.get('group_code') || '';
+  const status = url.searchParams.get('status') || 'active';
 
-  // 1) Lấy request (RLS: chỉ người chấm thấy request của mình)
-  const { data: reqRow, error: reqErr } = await supabase
-    .from('evaluation_requests')
-    .select('id,status,group_code,observation_id,campaign_id,evaluatee_user_id')
-    .eq('id', request_id)
-    .single();
+  let q = sb.from('eval360_forms')
+    .select('id, title, group_code, rubric_id, framework_id, course_code, status')
+    .eq('status', status)
+    .order('created_at', { ascending: false });
 
-  if (reqErr) return NextResponse.json({ error: reqErr.message }, { status: 400 });
-  if (reqRow.status !== 'pending') {
-    return NextResponse.json({ error: 'Request not pending' }, { status: 400 });
+  if (group_code) q = q.eq('group_code', group_code);
+
+  const { data, error } = await q;
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ items: data || [] });
+}
+
+export async function POST(req: Request) {
+  const sb = getSupabaseFromRequest(req);
+  const body = await req.json().catch(() => ({}));
+  const { id, title, group_code, rubric_id, framework_id, course_code, status } = body || {};
+
+  if (!title || !group_code || !rubric_id) {
+    return NextResponse.json({ error: 'Thiếu title/group_code/rubric_id' }, { status: 400 });
   }
 
-  // 2) Lấy campaign để biết rubric_id
-  const { data: camp, error: campErr } = await supabase
-    .from('evaluation_campaigns')
-    .select('id,name,rubric_id,start_at,end_at')
-    .eq('id', reqRow.campaign_id)
-    .single();
+  if (id) {
+    const { data, error } = await sb.from('eval360_forms')
+      .update({
+        title,
+        group_code,
+        rubric_id,
+        framework_id: framework_id ?? null,
+        course_code: course_code ?? null,
+        status: status ?? 'active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ data });
+  } else {
+    const { data, error } = await sb.from('eval360_forms')
+      .insert({
+        title,
+        group_code,
+        rubric_id,
+        framework_id: framework_id ?? null,
+        course_code: course_code ?? null,
+        status: status ?? 'active',
+      })
+      .select('*')
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ data }, { status: 201 });
+  }
+}
 
-  if (campErr) return NextResponse.json({ error: campErr.message }, { status: 400 });
+export async function DELETE(req: Request) {
+  const sb = getSupabaseFromRequest(req);
+  const url = new URL(req.url);
+  const id = url.searchParams.get('id') || '';
+  if (!id) return NextResponse.json({ error: 'Thiếu id' }, { status: 400 });
 
-  // 3) Lấy rubric
-  const { data: rubric, error: rerr } = await supabase
-    .from('rubrics')
-    .select('id,name,definition')
-    .eq('id', camp.rubric_id) // rubric_id là UUID (string)
-    .single();
-
-  if (rerr) return NextResponse.json({ error: rerr.message }, { status: 400 });
-
-  return NextResponse.json({
-    request: {
-      id: reqRow.id,
-      group_code: reqRow.group_code,
-      campaign_id: camp.id,
-      campaign_name: camp.name,
-      evaluatee_id: reqRow.evaluatee_user_id,
-    },
-    rubric,
-  });
+  const { error } = await sb.from('eval360_forms').delete().eq('id', id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
 }
