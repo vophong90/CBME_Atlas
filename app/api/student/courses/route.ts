@@ -1,64 +1,78 @@
+// app/api/student/courses/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabaseServer';
+import { createServiceClient, getSupabaseFromRequest } from '@/lib/supabaseServer';
 
-/**
- * GET /api/student/courses?student_id=...
- * Trả về danh sách học phần của sinh viên (ưu tiên từ kết quả đã có),
- * kèm thông tin Bộ môn quản lý.
- *
- * Output: [{ code, name, department: { id, name } }]
- */
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
-    const studentId = String(url.searchParams.get('student_id') ?? '').trim();
-    if (!studentId) return NextResponse.json({ items: [] });
+    const { searchParams } = new URL(req.url);
+    const paramStudentId = (searchParams.get('student_id') || '').trim();
 
-    const db = createServiceClient();
+    const admin = createServiceClient(); // service-role (bỏ qua RLS)
+    let studentId = paramStudentId;
 
-    // 1) Lấy thông tin SV (mssv, framework_id)
-    const { data: st, error: eSt } = await db
+    // Nếu caller không truyền student_id → dò theo auth session (user_id)
+    if (!studentId) {
+      const sb = getSupabaseFromRequest(req);
+      const { data: { user } } = await sb.auth.getUser();
+      if (user?.id) {
+        const { data: stu } = await admin
+          .from('students')
+          .select('id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+        if (stu?.id) studentId = stu.id as string;
+      }
+    }
+
+    if (!studentId) {
+      // Không xác định được sinh viên → trả mảng trống (để UI không vỡ)
+      return NextResponse.json<string[]>([]);
+    }
+
+    // Lấy thông tin sinh viên: framework_id + mssv (để lọc kết quả tải lên nếu có)
+    const { data: student, error: eStu } = await admin
       .from('students')
-      .select('id, mssv, framework_id')
+      .select('framework_id, mssv')
       .eq('id', studentId)
       .maybeSingle();
 
-    if (eSt) return NextResponse.json({ error: eSt.message }, { status: 400 });
-    if (!st) return NextResponse.json({ items: [] });
+    if (eStu) return NextResponse.json<string[]>([], { status: 200 });
+    const frameworkId = student?.framework_id || null;
+    const mssv = student?.mssv || null;
 
-    // 2) Lấy danh sách course_code SV đã có kết quả tải lên (nếu có)
-    const { data: codes } = await db
-      .from('student_clo_results_uploads')
-      .select('course_code')
-      .eq('mssv', st.mssv)
-      .eq('framework_id', st.framework_id);
+    // 1) Ưu tiên lấy các học phần đã có kết quả tải lên cho đúng sinh viên
+    let courseCodes: string[] = [];
+    if (mssv) {
+      const { data: up, error: eUp } = await admin
+        .from('student_clo_results_uploads')
+        .select('course_code')
+        .eq('mssv', mssv);
 
-    const courseCodes = Array.from(new Set((codes || []).map((x) => x.course_code).filter(Boolean)));
-
-    // 3) Lấy học phần theo courseCodes; nếu trống, fallback tất cả học phần trong framework SV
-    let coursesQuery = db
-      .from('v_courses_with_department')
-      .select('course_id, framework_id, course_code, course_name, department_id, department_name')
-      .eq('framework_id', st.framework_id);
-
-    if (courseCodes.length > 0) {
-      coursesQuery = coursesQuery.in('course_code', courseCodes);
+      if (!eUp && up) {
+        courseCodes = Array.from(new Set(up.map(r => String(r.course_code)).filter(Boolean)));
+      }
     }
 
-    const { data: rows, error: eCourses } = await coursesQuery;
-    if (eCourses) return NextResponse.json({ error: eCourses.message }, { status: 400 });
+    // 2) Nếu chưa có kết quả tải lên → fallback: toàn bộ courses theo framework_id
+    if ((!courseCodes || courseCodes.length === 0) && frameworkId) {
+      const { data: all, error: eAll } = await admin
+        .from('courses')
+        .select('course_code')
+        .eq('framework_id', frameworkId);
 
-    const items = (rows || []).map((r) => ({
-      code: r.course_code,
-      name: r.course_name,
-      department: r.department_id ? { id: r.department_id, name: r.department_name } : null,
-    }));
+      if (!eAll && all) {
+        courseCodes = Array.from(new Set(all.map(r => String(r.course_code)).filter(Boolean)));
+      }
+    }
 
-    return NextResponse.json({ items });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    // Trả ra mảng đã sort (string[])
+    return NextResponse.json<string[]>(courseCodes.sort());
+  } catch {
+    // Không lộ lỗi nội bộ ra UI — trả mảng rỗng để an toàn
+    return NextResponse.json<string[]>([], { status: 200 });
   }
 }
