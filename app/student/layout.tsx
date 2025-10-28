@@ -1,213 +1,143 @@
 'use client';
 
+import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import {
+  Home,
+  Flag,
+  Target,
+  MessageSquare,
+  ClipboardList,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { StudentProvider, useStudentCtx } from './context';
 
-/* inline icons (no deps) */
-const MenuIcon = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path strokeWidth="1.75" strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18" />
-  </svg>
-);
-const ChevronLeft = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M15 6l-6 6 6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-const ChevronRight = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M9 6l6 6-6 6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+};
 
-/* simple inline icons for nav */
-const TargetIcon = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <circle cx="12" cy="12" r="9" />
-    <circle cx="12" cy="12" r="5" />
-    <circle cx="12" cy="12" r="2" />
-  </svg>
-);
-const LayersIcon = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M12 2l9 5-9 5-9-5 9-5z" />
-    <path d="M3 12l9 5 9-5" />
-    <path d="M3 17l9 5 9-5" />
-  </svg>
-);
-const MessageSquare = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <path d="M21 15a2 2 0 01-2 2H8l-4 4V5a2 2 0 012-2h13a2 2 0 012 2z" />
-  </svg>
-);
-const ClipboardList = (p: any) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
-    <rect x="7" y="3" width="10" height="18" rx="2" />
-    <path d="M9 7h6M9 11h6M9 15h6" />
-    <path d="M9 3h6v3H9z" />
-  </svg>
-);
-
-const NAV = [
-  { href: '/student/pi', label: 'Tiến độ PI', desc: 'Mức độ đạt PI', Icon: TargetIcon },
-  { href: '/student/plo', label: 'Tiến độ PLO', desc: 'Tổng thể chương trình', Icon: LayersIcon },
-  { href: '/student/feedback', label: 'Phản hồi', desc: 'Góp ý học phần/giảng viên', Icon: MessageSquare },
-  { href: '/student/surveys', label: 'Khảo sát', desc: 'Phiếu khảo sát', Icon: ClipboardList },
+const NAV_ITEMS: NavItem[] = [
+  { href: '/student',           label: 'Tổng quan', icon: Home },
+  { href: '/student/plo',       label: 'PLO',       icon: Flag },
+  { href: '/student/pi',        label: 'PI',        icon: Target },
+  { href: '/student/feedback',  label: 'Góp ý',     icon: MessageSquare },
+  { href: '/student/surveys',   label: 'Khảo sát',  icon: ClipboardList },
 ];
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Sidebar({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname() || '';
-  const { studentId, setStudentId } = useStudentCtx();
-
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    try {
-      const s = localStorage.getItem('studentSidebarCollapsed');
-      if (s) setCollapsed(s === '1');
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem('studentSidebarCollapsed', collapsed ? '1' : '0');
-    } catch {}
-  }, [collapsed]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-white text-slate-900">
-      {/* Topbar (mobile) */}
-      <div className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/80 px-3 backdrop-blur md:hidden">
-        <button onClick={() => setMobileOpen(true)} className="rounded-lg border border-slate-200 p-2 active:scale-95">
-          <MenuIcon className="h-5 w-5" />
+    <aside
+      className={[
+        'hidden md:flex h-screen shrink-0 flex-col border-r border-slate-200 bg-white/95 backdrop-blur',
+        collapsed ? 'w-16' : 'w-64',
+        'sticky top-0 z-30',
+      ].join(' ')}
+    >
+      <div className="flex h-16 items-center px-4">
+        {!collapsed ? (
+          <div className="text-lg font-semibold">Sinh viên</div>
+        ) : (
+          <div className="text-base font-semibold">SV</div>
+        )}
+      </div>
+
+      <nav className="flex-1 space-y-1 px-2 py-2">
+        {NAV_ITEMS.map((it) => {
+          const active = pathname === it.href || pathname.startsWith(it.href + '/');
+          const Icon = it.icon;
+          return (
+            <Link
+              key={it.href}
+              href={it.href}
+              className={[
+                'group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium',
+                active
+                  ? 'bg-slate-100 text-slate-900'
+                  : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900',
+              ].join(' ')}
+              title={collapsed ? it.label : undefined}
+            >
+              <Icon className="h-5 w-5 shrink-0" />
+              {!collapsed && <span className="truncate">{it.label}</span>}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="p-3 text-[10px] text-slate-400">
+        {!collapsed && <div>© CBME Atlas</div>}
+      </div>
+    </aside>
+  );
+}
+
+function Topbar({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const { studentId, fullName, mssv, loading } = useStudentCtx();
+
+  return (
+    <div className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/85 px-4 backdrop-blur md:px-6">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onToggle}
+          className="hidden md:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white active:scale-95"
+          title={collapsed ? 'Mở menu' : 'Thu gọn menu'}
+        >
+          {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
         </button>
-        <div className="text-base font-semibold">Sinh viên</div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-slate-600">SV:</span>
-          <input
-            value={studentId}
-            onChange={(e) => setStudentId(e.target.value)}
-            placeholder="student_id"
-            className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
-          />
+        <div>
+          <div className="text-xl font-semibold leading-none">Sinh viên</div>
+          <div className="text-sm text-slate-600">Theo dõi tiến độ, góp ý và khảo sát</div>
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-[1400px]">
-        {/* Sidebar (desktop) */}
-        <aside
-          className={[
-            'hidden md:flex md:sticky md:top-0 md:h-[100dvh] md:flex-col md:border-r md:border-slate-200 md:bg-white',
-            collapsed ? 'md:w-16' : 'md:w-72',
-          ].join(' ')}
-        >
-          <div className="flex items-center justify-between gap-2 p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">SV</div>
-            {!collapsed && <div className="text-sm font-semibold">Trang sinh viên</div>}
-            <button onClick={() => setCollapsed((v) => !v)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
-              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </button>
+      <div className="flex items-center gap-3">
+        {loading ? (
+          <div className="h-5 w-40 animate-pulse rounded bg-slate-200" />
+        ) : studentId ? (
+          <div className="text-sm text-slate-700">
+            <span className="font-medium">{fullName || 'Sinh viên'}</span>
+            {mssv ? <span className="text-slate-500"> · MSSV {mssv}</span> : null}
           </div>
-          <nav className="flex-1 space-y-1 px-2 pb-3">
-            {NAV.map(({ href, label, desc, Icon }) => {
-              const active = pathname === href || pathname.startsWith(href + '/');
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={[
-                    'group relative flex items-center rounded-xl px-2 py-2 transition',
-                    active ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-brand-50',
-                  ].join(' ')}
-                >
-                  <Icon className={['mr-2 h-5 w-5', active ? 'text-white' : 'text-slate-500'].join(' ')} />
-                  <div className={collapsed ? 'sr-only' : 'min-w-0'}>
-                    <div className="truncate text-sm font-medium">{label}</div>
-                    <div className={['truncate text-xs', active ? 'text-white/80' : 'text-slate-500'].join(' ')}>{desc}</div>
-                  </div>
-                  {collapsed && (
-                    <span className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-brand-700 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition group-hover:opacity-100">
-                      {label}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
-          <div className="border-t p-3 text-center text-xs text-slate-500">CBME Atlas · Student</div>
-        </aside>
-
-        {/* Mobile Drawer */}
-        {mobileOpen && (
-          <>
-            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
-            <aside className="fixed left-0 top-0 z-50 h-full w-72 overflow-y-auto border-r border-slate-200 bg-white md:hidden">
-              <div className="flex items-center justify-between gap-2 p-3">
-                <div className="flex items-center gap-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow">SV</div>
-                  <div className="text-sm font-semibold">Trang sinh viên</div>
-                </div>
-                <button onClick={() => setMobileOpen(false)} className="rounded-lg border border-slate-200 p-2 hover:bg-brand-50">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-              </div>
-              <nav className="space-y-1 px-2 pb-3">
-                {NAV.map(({ href, label, Icon }) => {
-                  const active = pathname === href || pathname.startsWith(href + '/');
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setMobileOpen(false)}
-                      className={[
-                        'flex items-center rounded-xl px-2 py-2 transition',
-                        active ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-brand-50',
-                      ].join(' ')}
-                    >
-                      <Icon className={['mr-2 h-5 w-5', active ? 'text-white' : 'text-slate-500'].join(' ')} />
-                      <span className="text-sm font-medium">{label}</span>
-                    </Link>
-                  );
-                })}
-              </nav>
-            </aside>
-          </>
+        ) : (
+          <div className="text-sm font-medium text-red-600">Không xác định được sinh viên</div>
         )}
-
-        {/* Main */}
-        <main className="flex-1 p-6">
-          <div className="mb-6">
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h1 className="text-2xl font-semibold">Sinh viên</h1>
-                  <p className="text-sm text-slate-600">Theo dõi tiến độ, góp ý và làm khảo sát.</p>
-                </div>
-                <div className="hidden md:flex items-center gap-2">
-                  <span className="text-sm text-slate-600">SV:</span>
-                  <input
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    placeholder="student_id (tùy chọn)"
-                    className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-300"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-          {children}
-        </main>
       </div>
     </div>
   );
 }
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
     <StudentProvider>
-      <Shell>{children}</Shell>
+      <div className="min-h-screen bg-slate-50 md:flex">
+        {/* Sidebar (desktop) */}
+        <Sidebar collapsed={collapsed} />
+
+        {/* Main area */}
+        <div className="flex min-h-screen w-full flex-col">
+          {/* Topbar */}
+          <Topbar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
+
+          {/* Content */}
+          <main className={['mx-auto w-full max-w-7xl p-4 md:p-6', collapsed ? '' : ''].join(' ')}>
+            {children}
+          </main>
+        </div>
+      </div>
     </StudentProvider>
   );
 }
