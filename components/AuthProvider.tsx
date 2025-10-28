@@ -15,16 +15,16 @@ type Profile =
   | {
       role: 'student';
       name: string;
+      mssv: string | null;
       dept_id?: null;
       dept_name?: null;
-      mssv: string | null;
     }
   | {
       role: 'other';
       name: string;
+      mssv?: null;
       dept_id?: null;
       dept_name?: null;
-      mssv?: null;
     };
 
 type Ctx = {
@@ -43,13 +43,16 @@ const AuthCtx = createContext<Ctx>({
 
 export const useAuth = () => useContext(AuthCtx);
 
+// Cho phép cả object lẫn array cho department
+type DeptObj = { id: string; name: string };
+type DeptMaybeArray = DeptObj | DeptObj[] | null | undefined;
+
 type StaffRow = {
   user_id: string;
   full_name?: string | null;
   department_id?: string | null;
-  // Có thể nhận về 1 trong 2 dạng dưới đây:
-  department?: { id: string; name: string } | null; // khi dùng alias/định danh FK
-  departments?: { id: string; name: string }[] | { id: string; name: string } | null; // fallback
+  department?: DeptMaybeArray;   // alias theo FK: departments!staff_department_id_fkey
+  departments?: DeptMaybeArray;  // fallback nếu supabase trả "departments"
 };
 
 type StudentRow = {
@@ -65,8 +68,14 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function loadProfile(uid: string) {
-    // Join rõ bằng tên FK để nhận về object "department"
+  function pickDept(obj: DeptMaybeArray): DeptObj | null {
+    if (!obj) return null;
+    if (Array.isArray(obj)) return obj[0] ?? null;
+    return obj;
+  }
+
+  async function loadProfile(uid: string, u?: any) {
+    // Lấy staff kèm alias department theo tên FK
     const staffQ = supabase
       .from('staff')
       .select(
@@ -91,17 +100,16 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     if (stf) {
       const s = stf as StaffRow;
 
-      // Fallback: nếu vì lý do nào đó vẫn trả "departments"
-      const deptRaw = s.department ?? s.departments ?? null;
-      const deptObj = Array.isArray(deptRaw) ? deptRaw[0] : (deptRaw as any) ?? null;
+      // Chuẩn hoá department (ưu tiên alias "department", fallback "departments")
+      const deptObj = pickDept(s.department ?? s.departments ?? null);
 
       const displayName =
-        s.full_name || user?.user_metadata?.name || user?.email || 'Người dùng';
+        s.full_name || u?.user_metadata?.name || u?.email || 'Người dùng';
 
       setProfile({
         role: 'staff',
         name: displayName,
-        // Ưu tiên department_id từ staff; nếu null thì lấy từ deptObj.id
+        // Ưu tiên cột department_id trong staff; nếu null thì lấy id từ deptObj
         dept_id: s.department_id ?? (deptObj?.id ?? null),
         dept_name: deptObj?.name ?? null,
       });
@@ -111,7 +119,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     if (std) {
       const d = std as StudentRow;
       const displayName =
-        d.full_name || user?.user_metadata?.name || user?.email || 'Sinh viên';
+        d.full_name || u?.user_metadata?.name || u?.email || 'Sinh viên';
 
       setProfile({
         role: 'student',
@@ -121,10 +129,10 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       return;
     }
 
-    // Không phải staff/student
+    // Không khớp staff/student
     setProfile({
       role: 'other',
-      name: user?.user_metadata?.name || user?.email || 'Tài khoản',
+      name: u?.user_metadata?.name || u?.email || 'Tài khoản',
     });
   }
 
@@ -135,14 +143,14 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       const { data } = await supabase.auth.getUser();
       const u = data.user ?? null;
       setUser(u);
-      if (u) await loadProfile(u.id);
+      if (u) await loadProfile(u.id, u);
       setLoading(false);
 
       const sub = supabase.auth.onAuthStateChange(async (_event, session) => {
         const uu = session?.user ?? null;
         setUser(uu);
         if (uu) {
-          await loadProfile(uu.id);
+          await loadProfile(uu.id, uu);
         } else {
           setProfile(null);
         }
