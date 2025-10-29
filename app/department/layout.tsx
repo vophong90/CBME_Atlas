@@ -65,30 +65,30 @@ const NAV = [
   { href: '/department/inbox',   label: 'Hộp thư góp ý',    Icon: InboxIcon },
 ];
 
-/** ========== HeaderFilters ========== */
+/** ========== HeaderFilters (fixed) ========== */
 function HeaderFilters({ deptName }: { deptName?: string }) {
   const { frameworks, frameworkId, setFrameworkId, courses, courseCode, setCourseCode, formatFw } =
     useDepartmentCtx();
 
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm overflow-x-hidden">
+      <div className="flex flex-wrap items-end justify-between gap-3 md:gap-4">
+        {/* Block tiêu đề cần có min-w-0 để cho phép co/truncate */}
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold truncate">
             Bộ môn{deptName ? <span className="ml-2 text-brand-700">• {deptName}</span> : null}
           </h1>
-          <p className="text-sm text-slate-600">
-            Quản lý kết quả đo lường, học phần, rubric & hộp thư góp ý.
-          </p>
+          <p className="text-sm text-slate-600">Quản lý kết quả đo lường, học phần, rubric & hộp thư góp ý.</p>
         </div>
 
-        <div className="grid w-full gap-3 md:w-auto md:grid-cols-2">
-          <div>
+        {/* Khối filter: luôn w-full, giới hạn max-w, cho phép co */}
+        <div className="grid w-full min-w-0 gap-3 md:grid-cols-2 md:max-w-3xl md:shrink">
+          <div className="min-w-0">
             <label className="mb-1 block text-xs font-semibold">Khung chương trình</label>
             <select
               value={frameworkId}
               onChange={(e) => setFrameworkId(e.target.value)}
-              className="min-w-[260px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
+              className="w-full md:min-w-[260px] max-w-full truncate rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
             >
               <option value="">— Chọn khung —</option>
               {frameworks.map((f) => (
@@ -99,12 +99,12 @@ function HeaderFilters({ deptName }: { deptName?: string }) {
             </select>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="mb-1 block text-xs font-semibold">Học phần</label>
             <select
               value={courseCode}
               onChange={(e) => setCourseCode(e.target.value)}
-              className="min-w-[220px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
+              className="w-full md:min-w-[220px] max-w-full truncate rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-brand-300"
             >
               <option value="">— Tất cả —</option>
               {courses.map((c: any) => {
