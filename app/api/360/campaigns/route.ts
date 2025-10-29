@@ -23,15 +23,19 @@ function createAuthedServerClient() {
   });
 }
 
-async function ensureQA(sb: ReturnType<typeof createAuthedServerClient>) {
+type QAOk = { ok: true; userId: string };
+type QAFail = { ok: false; status: 401 | 403; error: 'UNAUTHORIZED' | 'FORBIDDEN' };
+type QAResult = QAOk | QAFail;
+
+async function ensureQA(sb: ReturnType<typeof createAuthedServerClient>): Promise<QAResult> {
   const {
     data: { user },
     error,
   } = await sb.auth.getUser();
   if (error || !user) {
-    return { ok: false, status: 401, error: 'UNAUTHORIZED' as const };
+    return { ok: false, status: 401, error: 'UNAUTHORIZED' };
   }
-  // Lấy role từ bảng user_roles → roles(code)
+
   const { data: rows } = await sb
     .from('user_roles')
     .select('roles:roles(code)')
@@ -39,13 +43,13 @@ async function ensureQA(sb: ReturnType<typeof createAuthedServerClient>) {
 
   const codes =
     (rows || [])
-      .flatMap((r: any) =>
-        Array.isArray(r?.roles) ? r.roles.map((x: any) => String(x?.code || '')) : [],
-      )
+      .flatMap((r: any) => (Array.isArray(r?.roles) ? r.roles.map((x: any) => String(x?.code || '')) : []))
       .filter(Boolean);
 
-  const ok = codes.includes('qa') || codes.includes('admin');
-  return ok ? ({ ok: true, user } as const) : ({ ok: false, status: 403, error: 'FORBIDDEN' as const });
+  if (codes.includes('qa') || codes.includes('admin')) {
+    return { ok: true, userId: user.id };
+  }
+  return { ok: false, status: 403, error: 'FORBIDDEN' };
 }
 
 /** GET: ?form_id=uuid → danh sách campaigns của form */
@@ -58,7 +62,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ items: [] });
   }
 
-  // Lấy rubric_id & scope từ form để liệt kê campaigns tương ứng
   const { data: form, error: fErr } = await sb
     .from('eval360_forms')
     .select('id, rubric_id, framework_id, course_code')
@@ -89,8 +92,10 @@ export async function POST(req: Request) {
   if (!form_id || !name || !start_at || !end_at) {
     return NextResponse.json({ error: 'Thiếu trường bắt buộc' }, { status: 400 });
   }
+  if (new Date(start_at) >= new Date(end_at)) {
+    return NextResponse.json({ error: 'start_at phải < end_at' }, { status: 400 });
+  }
 
-  // Lấy thông tin form để suy ra rubric_id / scope
   const { data: form, error: fErr } = await sb
     .from('eval360_forms')
     .select('id, rubric_id, framework_id, course_code')
@@ -100,29 +105,25 @@ export async function POST(req: Request) {
   if (fErr) return NextResponse.json({ error: fErr.message }, { status: 400 });
   if (!form) return NextResponse.json({ error: 'Form không tồn tại' }, { status: 404 });
 
-  // Tạo campaign
-  const insertPayload = {
-    name: String(name),
-    rubric_id: form.rubric_id,
-    framework_id: form.framework_id ?? null,
-    course_code: form.course_code ?? null,
-    start_at: new Date(start_at).toISOString(),
-    end_at: new Date(end_at).toISOString(),
-    // RLS thường yêu cầu created_by = auth.uid()
-    created_by: guard.user.id,
-  };
-
-  const { data, error } = await sb
+  const { data, error: iErr } = await sb
     .from('evaluation_campaigns')
-    .insert(insertPayload)
+    .insert({
+      name: String(name),
+      rubric_id: form.rubric_id,
+      framework_id: form.framework_id ?? null,
+      course_code: form.course_code ?? null,
+      start_at: new Date(start_at).toISOString(),
+      end_at: new Date(end_at).toISOString(),
+      created_by: guard.userId, // ✅ không còn lỗi possibly undefined
+    })
     .select('id, name, start_at, end_at, rubric_id, framework_id, course_code')
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (iErr) return NextResponse.json({ error: iErr.message }, { status: 400 });
   return NextResponse.json({ ok: true, item: data }, { status: 201 });
 }
 
-/** PATCH: ?id=bigint { action: 'close_now' } → cập nhật end_at = now */
+/** PATCH: ?id=bigint { action: 'close_now' } → end_at = now */
 export async function PATCH(req: Request) {
   const sb = createAuthedServerClient();
   const guard = await ensureQA(sb);
