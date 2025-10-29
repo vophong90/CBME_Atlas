@@ -1,3 +1,4 @@
+// app/api/department/courses/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -10,16 +11,15 @@ export async function GET(req: Request) {
     const frameworkId = url.searchParams.get('framework_id') || '';
     const q            = (url.searchParams.get('q') || '').trim();
 
-    const sb = getSupabaseFromRequest(req); // RLS theo session
+    const sb = getSupabaseFromRequest(req); // dùng session → RLS có hiệu lực
 
-    // Lấy dept_id của user đang đăng nhập
+    // Lấy user id
     const { data: userRes, error: eUser } = await sb.auth.getUser();
     if (eUser) return NextResponse.json({ error: eUser.message }, { status: 401 });
     const uid = userRes?.user?.id;
     if (!uid) return NextResponse.json({ data: [] }, { status: 200 });
 
-    // Tuỳ schema của bạn: bảng nào lưu mapping user→department
-    // Ví dụ ở đây là 'staff(user_id, department_id)'
+    // Lấy department_id của user (theo schema hiện tại: bảng 'staff')
     const { data: me, error: e0 } = await sb
       .from('staff')
       .select('department_id')
@@ -32,21 +32,26 @@ export async function GET(req: Request) {
     }
     const deptId = me.department_id as string;
 
-    // Đọc từ VIEW để luôn có trạng thái gán bộ môn mới nhất
+    // Đọc từ VIEW để luôn phản ánh đúng gán bộ môn
     let query = sb
       .from('v_courses_with_department')
-      .select('code, name')
-      .eq('department_id', deptId);
+      .select('course_id, framework_id, course_code, course_name, department_id, department_name')
+      .eq('department_id', deptId)
+      .order('course_code', { ascending: true });
 
     if (frameworkId) query = query.eq('framework_id', frameworkId);
-    if (q)           query = query.or(`code.ilike.%${q}%,name.ilike.%${q}%`);
-    query = query.order('code', { ascending: true });
+    if (q)           query = query.or(`course_code.ilike.%${q}%,course_name.ilike.%${q}%`);
 
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-    // Khớp shape DepartmentProvider mong đợi: { data: Array<{code,name}> }
-    return NextResponse.json({ data: data ?? [], department_id: deptId }, { status: 200 });
+    // Map về shape FE cần: { code, name }
+    const items = (data || []).map((r: any) => ({
+      code: r.course_code,
+      name: r.course_name,
+    }));
+
+    return NextResponse.json({ data: items, department_id: deptId }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
   }
