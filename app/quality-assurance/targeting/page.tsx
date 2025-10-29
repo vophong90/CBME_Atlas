@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 type RolePick = 'lecturer' | 'student';
 
@@ -43,7 +43,6 @@ function shortId(id?: string | null) {
   if (!id) return '';
   return id.slice(0, 4);
 }
-
 function fwLabel(fw?: Partial<FW> | null, id?: string | null) {
   if (!fw) return `#${shortId(id)}`;
   const parts = [fw.doi_tuong, fw.chuyen_nganh, fw.nien_khoa].filter(Boolean);
@@ -65,8 +64,8 @@ export default function TargetingPage() {
   const [depMap, setDepMap] = useState<Record<string, string>>({});
   const [fwMap, setFwMap] = useState<Record<string, string>>({});
 
-  const [selectedDept, setSelectedDept] = useState<string>(ALL);       // '', '__NULL__', or dept id
-  const [selectedFW, setSelectedFW]     = useState<string>(ALL);       // '', '__NULL__', or fw id
+  const [selectedDept, setSelectedDept] = useState<string>(ALL);
+  const [selectedFW, setSelectedFW]     = useState<string>(ALL);
 
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [selectAll, setSelectAll] = useState(false);
@@ -75,7 +74,7 @@ export default function TargetingPage() {
   const [inviting, setInviting] = useState(false);
   const [toast, setToast] = useState<{ type: 'success'|'error'; text: string } | null>(null);
 
-  // ====== Load Surveys ======
+  // ===== Surveys =====
   async function loadSurveys() {
     try {
       const supabase = getSupabase();
@@ -96,7 +95,7 @@ export default function TargetingPage() {
     }
   }
 
-  // ====== Load People ======
+  // ===== People =====
   async function loadPeople(role: RolePick) {
     setLoading(true);
     setToast(null);
@@ -108,6 +107,7 @@ export default function TargetingPage() {
         .eq('role', role)
         .order('name', { ascending: true });
       if (error) throw error;
+
       const rows = (data ?? []).map((r: any) => ({
         user_id: r.user_id as string,
         name: r.name as string | null,
@@ -117,9 +117,12 @@ export default function TargetingPage() {
         framework_id: r.framework_id,
         unit_id: r.unit_id,
       })) as Person[];
+
       setPeople(rows);
       setSelected({});
       setSelectAll(false);
+      setSelectedDept(ALL);
+      setSelectedFW(ALL);
     } catch (e: any) {
       setToast({ type: 'error', text: e.message ?? 'Không tải được danh sách đối tượng' });
     } finally {
@@ -127,7 +130,7 @@ export default function TargetingPage() {
     }
   }
 
-  // ====== Load Departments / Frameworks (labels) ======
+  // ===== Labels (Departments/Frameworks) =====
   async function loadDepartments() {
     try {
       const supabase = getSupabase();
@@ -142,12 +145,10 @@ export default function TargetingPage() {
       rows.forEach(d => { m[d.id] = d.name || `Bộ môn #${shortId(d.id)}`; });
       setDepMap(m);
     } catch {
-      // Fallback: không có quyền xem departments → để trống, UI sẽ rơi về nhãn rút gọn từ id
       setDepartments([]);
       setDepMap({});
     }
   }
-
   async function loadFrameworks() {
     try {
       const supabase = getSupabase();
@@ -173,30 +174,24 @@ export default function TargetingPage() {
     loadFrameworks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
   useEffect(() => {
     loadPeople(audience);
-    setSelectedDept(ALL);
-    setSelectedFW(ALL);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audience]);
 
-  // ====== Compute filtered options present in current people list ======
+  // ===== Options present in people list =====
   const deptIdsInPeople = useMemo(() => {
     const s = new Set<string | null>();
     people.forEach(p => s.add(p.department_id ?? null));
     return s;
   }, [people]);
-
   const fwIdsInPeople = useMemo(() => {
     const s = new Set<string | null>();
     people.forEach(p => s.add(p.framework_id ?? null));
     return s;
   }, [people]);
 
-  // Dropdown options limited to what's present in the current people list (plus All)
   const deptOptions = useMemo(() => {
-    // build list: ALL, NULL, then ids
     const ids: (string | null)[] = Array.from(deptIdsInPeople.values());
     const onlyIds = ids.filter((x): x is string => !!x);
     const unique = Array.from(new Set(onlyIds));
@@ -213,24 +208,21 @@ export default function TargetingPage() {
     });
   }, [fwIdsInPeople, frameworks]);
 
-  // ====== Filtering logic ======
+  // ===== Filtered list =====
   const filtered = useMemo(() => {
     const v = q.trim().toLowerCase();
     return people.filter(p => {
-      // search by name/email
       if (v) {
         const okText =
           (p.name || '').toLowerCase().includes(v) ||
           (p.email || '').toLowerCase().includes(v);
         if (!okText) return false;
       }
-      // department filter
       if (selectedDept === NULL_SENTINEL) {
         if (p.department_id !== null && p.department_id !== undefined) return false;
       } else if (selectedDept !== ALL) {
         if (p.department_id !== selectedDept) return false;
       }
-      // framework filter
       if (selectedFW === NULL_SENTINEL) {
         if (p.framework_id !== null && p.framework_id !== undefined) return false;
       } else if (selectedFW !== ALL) {
@@ -252,33 +244,33 @@ export default function TargetingPage() {
       setSelected({});
     }
   }
-
   function toggleOne(id: string, checked: boolean) {
     setSelected(prev => ({ ...prev, [id]: checked }));
   }
 
+  // ===== Invite =====
   async function invite() {
     if (!surveyId) {
       setToast({ type: 'error', text: 'Vui lòng chọn Bảng khảo sát' });
       return;
     }
-    const ids = Object.entries(selected).filter(([,v]) => v).map(([k]) => k);
+    const ids = Object.entries(selected).filter(([, v]) => v).map(([k]) => k);
     if (ids.length === 0) {
       setToast({ type: 'error', text: 'Chưa chọn người nhận khảo sát' });
       return;
     }
-
     setInviting(true);
     setToast(null);
     try {
       const supabase = getSupabase();
 
-      // Tránh trùng (unique (survey_id, assigned_to))
+      // tránh trùng theo unique (survey_id, assigned_to)
       const { data: existed, error: e1 } = await supabase
         .from('survey_assignments')
         .select('assigned_to')
         .eq('survey_id', surveyId);
       if (e1) throw e1;
+
       const existing = new Set<string>((existed ?? []).map((r: any) => r.assigned_to as string));
       const toAdd = ids.filter(uid => !existing.has(uid));
       if (toAdd.length === 0) {
@@ -292,8 +284,8 @@ export default function TargetingPage() {
         return {
           survey_id: surveyId,
           assigned_to: uid,
-          role: audience,                 // check constraint: lecturer|student|support
-          department: p?.department_id || null, // nếu bạn muốn ghi id làm text
+          role: audience,                       // 'lecturer' | 'student'
+          department: p?.department_id || null, // cột text – bạn đang lưu id cho tiện tra cứu
           cohort: null as any,
           unit: p?.unit_id || null,
           invited_at: nowIso,
@@ -317,10 +309,9 @@ export default function TargetingPage() {
         <h1 className="text-2xl font-semibold">Mời tham gia khảo sát</h1>
       </div>
 
-      {/* Bộ lọc + chọn survey */}
+      {/* Filters + survey picker */}
       <div className="border rounded-xl p-4 bg-white space-y-3">
         <div className="grid md:grid-cols-6 gap-3">
-          {/* Audience */}
           <div className="md:col-span-1">
             <label className="text-sm">Đối tượng</label>
             <select
@@ -333,7 +324,6 @@ export default function TargetingPage() {
             </select>
           </div>
 
-          {/* Survey */}
           <div className="md:col-span-2">
             <label className="text-sm">Bảng khảo sát</label>
             <select
@@ -350,7 +340,6 @@ export default function TargetingPage() {
             </select>
           </div>
 
-          {/* Department filter */}
           <div className="md:col-span-1">
             <label className="text-sm">Bộ môn</label>
             <select
@@ -359,18 +348,13 @@ export default function TargetingPage() {
               onChange={(e) => setSelectedDept(e.target.value)}
             >
               <option value={ALL}>— Tất cả —</option>
-              {deptIdsInPeople.has(null) && (
-                <option value={NULL_SENTINEL}>(Chưa gán)</option>
-              )}
+              {deptIdsInPeople.has(null) && <option value={NULL_SENTINEL}>(Chưa gán)</option>}
               {deptOptions.map(d => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
+                <option key={d.id} value={d.id}>{d.label}</option>
               ))}
             </select>
           </div>
 
-          {/* Framework filter */}
           <div className="md:col-span-1">
             <label className="text-sm">Khung đào tạo</label>
             <select
@@ -379,18 +363,13 @@ export default function TargetingPage() {
               onChange={(e) => setSelectedFW(e.target.value)}
             >
               <option value={ALL}>— Tất cả —</option>
-              {fwIdsInPeople.has(null) && (
-                <option value={NULL_SENTINEL}>(Chưa gán)</option>
-              )}
+              {fwIdsInPeople.has(null) && <option value={NULL_SENTINEL}>(Chưa gán)</option>}
               {fwOptions.map(f => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
+                <option key={f.id} value={f.id}>{f.label}</option>
               ))}
             </select>
           </div>
 
-          {/* Search */}
           <div className="md:col-span-1">
             <label className="text-sm">Tìm theo tên/email</label>
             <input
@@ -405,7 +384,7 @@ export default function TargetingPage() {
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-600">
             {loading ? 'Đang tải danh sách…' : `Có ${filtered.length} bản ghi`}
-            {Object.keys(selected).length > 0 ? ` • Đã chọn ${Object.values(selected).filter(Boolean).length}` : ''}
+            {selectedCount > 0 ? ` • Đã chọn ${selectedCount}` : ''}
           </div>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm">
@@ -427,10 +406,10 @@ export default function TargetingPage() {
         </div>
       </div>
 
-      {/* Bảng danh sách */}
+      {/* Table */}
       <div className="border rounded-xl p-4 bg-white">
         <div className="overflow-auto">
-          <table className="min-w-[860px] w-full border-collapse">
+          <table className="min-w-[900px] w-full border-collapse">
             <thead>
               <tr className="border-b text-left">
                 <th className="py-2 pr-3 w-12">Chọn</th>
@@ -485,9 +464,7 @@ export default function TargetingPage() {
       </div>
 
       {toast && (
-        <div
-          className={`p-3 rounded-md ${toast.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
-        >
+        <div className={`p-3 rounded-md ${toast.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
           {toast.text}
         </div>
       )}
