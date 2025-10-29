@@ -1,93 +1,104 @@
+// app/api/360/form/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { getSupabaseFromRequest } from '@/lib/supabaseServer';
-
-/** QA/Admin guard (không phụ thuộc helper ngoài) */
-async function requireQA(sb: any) {
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return { ok: false as const, resp: NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 }) };
-
-  const { data, error } = await sb
-    .from('user_roles')
-    .select('roles:roles(code)')
-    .eq('staff_user_id', user.id);
-
-  if (error) return { ok: false as const, resp: NextResponse.json({ error: error.message }, { status: 403 }) };
-  const codes = (data || []).map((r: any) => r.roles?.code).filter(Boolean);
-  if (!codes.includes('admin') && !codes.includes('qa')) {
-    return { ok: false as const, resp: NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 }) };
-  }
-  return { ok: true as const, user };
-}
+import { createServiceClient } from '@/lib/supabaseServer';
 
 export async function GET(req: Request) {
-  const sb = getSupabaseFromRequest(req);
-  const guard = await requireQA(sb);
-  if (!guard.ok) return guard.resp;
-
+  const sb = createServiceClient();
   const url = new URL(req.url);
-  const group_code = url.searchParams.get('group_code') || '';
-  const status = url.searchParams.get('status') || '';
+  const status = url.searchParams.get('status') || undefined;
+  const group  = url.searchParams.get('group_code') || undefined;
 
   let q = sb.from('eval360_forms')
-    .select('id, title, group_code, rubric_id, framework_id, course_code, status, created_at, updated_at')
+    .select('id,title,group_code,rubric_id,framework_id,course_code,status,created_at,updated_at')
     .order('created_at', { ascending: false });
 
-  if (status)     q = q.eq('status', status);
-  if (group_code) q = q.eq('group_code', group_code);
+  if (status && status !== 'all') q = q.eq('status', status);
+  if (group  && group  !== 'all') q = q.eq('group_code', group);
 
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ items: data || [] });
+  return NextResponse.json({ items: data ?? [] });
 }
 
 export async function POST(req: Request) {
-  const sb = getSupabaseFromRequest(req);
-  const guard = await requireQA(sb);
-  if (!guard.ok) return guard.resp;
-
+  const sb = createServiceClient();
   const body = await req.json().catch(() => ({}));
-  const { id, title, group_code, status, rubric_id, new_rubric } = body || {};
+
+  const {
+    id,
+    title,
+    group_code,
+    status,
+    rubric_id,
+    framework_id: bodyFrameworkId,
+    course_code: bodyCourseCode,
+    new_rubric, // { title, threshold, framework_id, course_code, definition }
+  } = body || {};
 
   if (!title || !group_code) {
     return NextResponse.json({ error: 'Thiếu title/group_code' }, { status: 400 });
   }
 
-  // Nếu có new_rubric -> tạo rubric trước
-  let finalRubricId: string | null = rubric_id ?? null;
+  let finalRubricId: string | undefined = rubric_id;
+  let formFrameworkId: string | null = bodyFrameworkId ?? null;
+  let formCourseCode: string | null   = bodyCourseCode ?? null;
 
+  // 1) Nếu FE gửi builder rubric mới → tạo rubric trước
   if (!finalRubricId && new_rubric) {
     const { title: rtitle, threshold, framework_id, course_code, definition } = new_rubric || {};
-    if (!rtitle || !framework_id || !course_code || !definition) {
-      return NextResponse.json({ error: 'new_rubric thiếu title/framework_id/course_code/definition' }, { status: 400 });
+    if (!rtitle || !definition) {
+      return NextResponse.json({ error: 'Thiếu rubric title/definition' }, { status: 400 });
     }
-    const ins = await sb.from('rubrics')
+
+    const { data: rub, error: rerr } = await sb
+      .from('rubrics')
       .insert({
-        framework_id,
-        course_code,
         title: rtitle,
-        definition,
-        threshold: typeof threshold === 'number' ? threshold : 70,
+        threshold: threshold ?? null,
+        framework_id: framework_id ?? null,    // nếu rubrics yêu cầu NOT NULL, FE đã bắt buộc chọn
+        course_code: course_code ?? null,
+        definition
       })
-      .select('id')
+      .select('id, framework_id, course_code')
       .single();
-    if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 400 });
-    finalRubricId = ins.data.id;
+    if (rerr) return NextResponse.json({ error: rerr.message }, { status: 400 });
+
+    finalRubricId = rub.id;
+    // nếu form chưa có framework/course → copy từ rubric mới
+    formFrameworkId = formFrameworkId ?? rub.framework_id ?? null;
+    formCourseCode  = formCourseCode  ?? rub.course_code  ?? null;
   }
 
+  // 2) Nếu dùng rubric có sẵn mà form chưa có framework/course → lấy theo rubric
   if (!finalRubricId) {
-    return NextResponse.json({ error: 'Thiếu rubric_id hoặc new_rubric' }, { status: 400 });
+    return NextResponse.json({ error: 'Thiếu rubric_id' }, { status: 400 });
+  }
+  if (!formFrameworkId || !formCourseCode) {
+    const { data: rub } = await sb
+      .from('rubrics')
+      .select('id, framework_id, course_code')
+      .eq('id', finalRubricId)
+      .single();
+    if (rub) {
+      formFrameworkId = formFrameworkId ?? rub.framework_id ?? null;
+      formCourseCode  = formCourseCode  ?? rub.course_code  ?? null;
+    }
   }
 
+  // 3) Ghi vào eval360_forms
   if (id) {
-    const { data, error } = await sb.from('eval360_forms')
+    const { data, error } = await sb
+      .from('eval360_forms')
       .update({
         title,
         group_code,
-        rubric_id: finalRubricId,
         status: status ?? 'active',
+        rubric_id: finalRubricId,
+        framework_id: formFrameworkId, // có thể null theo schema của bạn
+        course_code: formCourseCode,   // có thể null theo schema của bạn
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -96,12 +107,15 @@ export async function POST(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ data });
   } else {
-    const { data, error } = await sb.from('eval360_forms')
+    const { data, error } = await sb
+      .from('eval360_forms')
       .insert({
         title,
         group_code,
-        rubric_id: finalRubricId,
         status: status ?? 'active',
+        rubric_id: finalRubricId,
+        framework_id: formFrameworkId,
+        course_code: formCourseCode,
       })
       .select('*')
       .single();
@@ -111,10 +125,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const sb = getSupabaseFromRequest(req);
-  const guard = await requireQA(sb);
-  if (!guard.ok) return guard.resp;
-
+  const sb = createServiceClient();
   const url = new URL(req.url);
   const id = url.searchParams.get('id') || '';
   if (!id) return NextResponse.json({ error: 'Thiếu id' }, { status: 400 });
