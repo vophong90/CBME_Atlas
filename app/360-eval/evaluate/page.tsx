@@ -58,9 +58,7 @@ async function fetchJson(url: string, init?: RequestInit) {
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
     const text = await res.text();
-    throw new Error(
-      `Non-JSON response from ${url}: ${res.status} ${text.slice(0, 200)}`
-    );
+    throw new Error(`Non-JSON response from ${url}: ${res.status} ${text.slice(0, 200)}`);
   }
   const data = await res.json();
   if (!res.ok) {
@@ -70,7 +68,7 @@ async function fetchJson(url: string, init?: RequestInit) {
   return data;
 }
 
-/* =============== Combobox async (giữ nguyên logic) =============== */
+/* =============== Combobox async =============== */
 function AsyncStudentCombobox({
   value,
   onChange,
@@ -146,18 +144,8 @@ function AsyncStudentCombobox({
         <span className={selectedLabel ? '' : 'text-slate-400'}>
           {selectedLabel || placeholder}
         </span>
-        <svg
-          className="ml-2 h-4 w-4 text-slate-500"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-        >
-          <path
-            d="M6 9l6 6 6-6"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+        <svg className="ml-2 h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M6 9l6 6 6-6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 
@@ -173,16 +161,10 @@ function AsyncStudentCombobox({
             />
           </div>
           <div className="max-h-64 overflow-auto border-t">
-            {loading && (
-              <div className="px-3 py-2 text-sm text-slate-500">Đang tìm…</div>
-            )}
-            {err && !loading && (
-              <div className="px-3 py-2 text-sm text-red-600">{err}</div>
-            )}
+            {loading && <div className="px-3 py-2 text-sm text-slate-500">Đang tìm…</div>}
+            {err && !loading && <div className="px-3 py-2 text-sm text-red-600">{err}</div>}
             {!loading && !err && opts.length === 0 && (
-              <div className="px-3 py-2 text-sm text-slate-500">
-                Không có kết quả
-              </div>
+              <div className="px-3 py-2 text-sm text-slate-500">Không có kết quả</div>
             )}
             {!loading &&
               !err &&
@@ -304,9 +286,9 @@ export default function Eval360DoPage() {
   }
 
   const canSubmit = useMemo(() => {
-    if (!evaluatee?.user_id || !rubric) return false;
+    if (!evaluatee?.user_id || !rubric || !formId) return false;
     return rubric.definition.rows.every((row) => !!answers[row.key]);
-  }, [evaluatee, rubric, answers]);
+  }, [evaluatee, rubric, formId, answers]);
 
   async function handleSubmit() {
     if (!rubric || !evaluatee?.user_id || !formId) return;
@@ -314,7 +296,7 @@ export default function Eval360DoPage() {
       setLoading(true);
       setErr('');
 
-      // 1) tạo request bằng form_id
+      // 1) tạo request bằng form_id (API xác định campaign_id phù hợp)
       const st = await fetchJson('/api/360/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -352,6 +334,7 @@ export default function Eval360DoPage() {
       if (group !== 'self') setEvaluatee(null);
       setFormId('');
       setRubric(null);
+      // forms giữ nguyên để người dùng có thể nộp tiếp
     } catch (e: any) {
       setErr(e?.message || 'Lỗi gửi đánh giá');
     } finally {
@@ -391,6 +374,11 @@ export default function Eval360DoPage() {
                   : 'Nhập MSSV hoặc tên để tìm…'
               }
             />
+            {group === 'self' && !selfUserId && (
+              <div className="mt-1 text-xs text-slate-500">
+                * Bạn đang ở chế độ khách, nên không thể “Tự đánh giá”. Chọn nhóm khác hoặc đăng nhập.
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -439,9 +427,7 @@ export default function Eval360DoPage() {
                           type="radio"
                           name={`row-${row.key}`}
                           checked={answers[row.key] === col.key}
-                          onChange={() =>
-                            setAnswers((a) => ({ ...a, [row.key]: col.key }))
-                          }
+                          onChange={() => setAnswers((a) => ({ ...a, [row.key]: col.key }))}
                         />
                       </td>
                     ))}
