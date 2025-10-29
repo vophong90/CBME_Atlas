@@ -57,6 +57,7 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
   const [depMap, setDepMap] = useState<Record<string, string>>({});
   const [fwMap, setFwMap] = useState<Record<string, string>>({});
 
+  // chỉ 1 bộ lọc hoạt động tùy theo audience
   const [selectedDept, setSelectedDept] = useState<string>(ALL);
   const [selectedFW, setSelectedFW]     = useState<string>(ALL);
 
@@ -66,6 +67,9 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
   const [loading, setLoading] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [toast, setToast] = useState<{ type: 'success'|'error'; text: string } | null>(null);
+
+  const isLecturer = audience === 'lecturer';
+  const isStudent  = audience === 'student';
 
   // ===== Surveys =====
   async function loadSurveys() {
@@ -114,6 +118,7 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
       setPeople(rows);
       setSelected({});
       setSelectAll(false);
+      // reset đúng bộ lọc hoạt động
       setSelectedDept(ALL);
       setSelectedFW(ALL);
     } catch (e: any) {
@@ -172,7 +177,7 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audience]);
 
-  // ===== Options present in people list =====
+  // ===== Options present in people list (để chỉ show những giá trị đang có) =====
   const deptIdsInPeople = useMemo(() => {
     const s = new Set<string | null>();
     people.forEach(p => s.add(p.department_id ?? null));
@@ -201,7 +206,7 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
     });
   }, [fwIdsInPeople, frameworks]);
 
-  // ===== Filtered list =====
+  // ===== Filtered list (chỉ áp bộ lọc phù hợp audience) =====
   const filtered = useMemo(() => {
     const v = q.trim().toLowerCase();
     return people.filter(p => {
@@ -211,19 +216,23 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
           (p.email || '').toLowerCase().includes(v);
         if (!okText) return false;
       }
-      if (selectedDept === NULL_SENTINEL) {
-        if (p.department_id !== null && p.department_id !== undefined) return false;
-      } else if (selectedDept !== ALL) {
-        if (p.department_id !== selectedDept) return false;
+      if (isLecturer) {
+        if (selectedDept === NULL_SENTINEL) {
+          if (p.department_id !== null && p.department_id !== undefined) return false;
+        } else if (selectedDept !== ALL) {
+          if (p.department_id !== selectedDept) return false;
+        }
       }
-      if (selectedFW === NULL_SENTINEL) {
-        if (p.framework_id !== null && p.framework_id !== undefined) return false;
-      } else if (selectedFW !== ALL) {
-        if (p.framework_id !== selectedFW) return false;
+      if (isStudent) {
+        if (selectedFW === NULL_SENTINEL) {
+          if (p.framework_id !== null && p.framework_id !== undefined) return false;
+        } else if (selectedFW !== ALL) {
+          if (p.framework_id !== selectedFW) return false;
+        }
       }
       return true;
     });
-  }, [people, q, selectedDept, selectedFW]);
+  }, [people, q, selectedDept, selectedFW, isLecturer, isStudent]);
 
   const selectedCount = useMemo(() => Object.values(selected).filter(Boolean).length, [selected]);
 
@@ -274,15 +283,27 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
       const nowIso = new Date().toISOString();
       const rows = toAdd.map(uid => {
         const p = people.find(x => x.user_id === uid);
-        return {
-          survey_id: surveyId,
-          assigned_to: uid,
-          role: audience,                       // 'lecturer' | 'student'
-          department: p?.department_id || null, // cột text – đang lưu id cho tiện tra cứu
-          cohort: null as any,
-          unit: p?.unit_id || null,
-          invited_at: nowIso,
-        };
+        if (isLecturer) {
+          return {
+            survey_id: surveyId,
+            assigned_to: uid,
+            role: 'lecturer' as const,
+            department: p?.department_id || null, // text: lưu id
+            cohort: null as any,
+            unit: p?.unit_id || null,
+            invited_at: nowIso,
+          };
+        } else {
+          return {
+            survey_id: surveyId,
+            assigned_to: uid,
+            role: 'student' as const,
+            department: null as any,
+            cohort: p?.framework_id || null,      // text: lưu framework_id
+            unit: null as any,
+            invited_at: nowIso,
+          };
+        }
       });
 
       const { error: e2 } = await supabase.from('survey_assignments').insert(rows);
@@ -302,22 +323,10 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
         <h1 className="text-2xl font-semibold">Mời tham gia khảo sát</h1>
       </div>
 
-      {/* Filters + survey picker */}
-      <div className="border rounded-xl p-4 bg-white space-y-3">
-        <div className="grid md:grid-cols-6 gap-3">
-          <div className="md:col-span-1">
-            <label className="text-sm">Đối tượng</label>
-            <select
-              className="w-full border rounded px-3 py-2"
-              value={audience}
-              onChange={(e) => setAudience(e.target.value as RolePick)}
-            >
-              <option value="lecturer">Giảng viên</option>
-              <option value="student">Sinh viên</option>
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
+      {/* HÀNG 1: chỉ chọn Bảng khảo sát */}
+      <div className="border rounded-xl p-4 bg-white">
+        <div className="grid md:grid-cols-3 gap-3">
+          <div className="md:col-span-3">
             <label className="text-sm">Bảng khảo sát</label>
             <select
               className="w-full border rounded px-3 py-2"
@@ -332,38 +341,59 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
               ))}
             </select>
           </div>
+        </div>
+      </div>
 
+      {/* HÀNG 2: Đối tượng + bộ lọc theo đối tượng + tìm kiếm + chọn tất cả + mời */}
+      <div className="border rounded-xl p-4 bg-white space-y-3">
+        <div className="grid md:grid-cols-6 gap-3">
           <div className="md:col-span-1">
-            <label className="text-sm">Bộ môn</label>
+            <label className="text-sm">Đối tượng</label>
             <select
               className="w-full border rounded px-3 py-2"
-              value={selectedDept}
-              onChange={(e) => setSelectedDept(e.target.value)}
+              value={audience}
+              onChange={(e) => setAudience(e.target.value as RolePick)}
             >
-              <option value={ALL}>— Tất cả —</option>
-              {deptIdsInPeople.has(null) && <option value={NULL_SENTINEL}>(Chưa gán)</option>}
-              {deptOptions.map(d => (
-                <option key={d.id} value={d.id}>{d.label}</option>
-              ))}
+              <option value="lecturer">Giảng viên</option>
+              <option value="student">Sinh viên</option>
             </select>
           </div>
 
-          <div className="md:col-span-1">
-            <label className="text-sm">Khung đào tạo</label>
-            <select
-              className="w-full border rounded px-3 py-2"
-              value={selectedFW}
-              onChange={(e) => setSelectedFW(e.target.value)}
-            >
-              <option value={ALL}>— Tất cả —</option>
-              {fwIdsInPeople.has(null) && <option value={NULL_SENTINEL}>(Chưa gán)</option>}
-              {fwOptions.map(f => (
-                <option key={f.id} value={f.id}>{f.label}</option>
-              ))}
-            </select>
-          </div>
+          {isLecturer && (
+            <div className="md:col-span-2">
+              <label className="text-sm">Bộ môn</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={selectedDept}
+                onChange={(e) => setSelectedDept(e.target.value)}
+              >
+                <option value={ALL}>— Tất cả —</option>
+                {deptIdsInPeople.has(null) && <option value={NULL_SENTINEL}>(Chưa gán)</option>}
+                {deptOptions.map(d => (
+                  <option key={d.id} value={d.id}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          <div className="md:col-span-1">
+          {isStudent && (
+            <div className="md:col-span-2">
+              <label className="text-sm">Khung đào tạo</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={selectedFW}
+                onChange={(e) => setSelectedFW(e.target.value)}
+              >
+                <option value={ALL}>— Tất cả —</option>
+                {fwIdsInPeople.has(null) && <option value={NULL_SENTINEL}>(Chưa gán)</option>}
+                {fwOptions.map(f => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="md:col-span-2">
             <label className="text-sm">Tìm theo tên/email</label>
             <input
               className="w-full border rounded px-3 py-2"
@@ -408,8 +438,8 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
                 <th className="py-2 pr-3 w-12">Chọn</th>
                 <th className="py-2 pr-3">Họ tên</th>
                 <th className="py-2 pr-3">Email</th>
-                <th className="py-2 pr-3">Bộ môn</th>
-                <th className="py-2 pr-3">Khung</th>
+                {isLecturer && <th className="py-2 pr-3">Bộ môn</th>}
+                {isStudent  && <th className="py-2 pr-3">Khung</th>}
                 <th className="py-2 pr-3 w-32">Đối tượng</th>
               </tr>
             </thead>
@@ -427,26 +457,33 @@ export default function TargetingClient({ preSurveyId }: { preSurveyId?: string 
                     </td>
                     <td className="py-2 pr-3">{p.name || '—'}</td>
                     <td className="py-2 pr-3">{p.email || '—'}</td>
-                    <td className="py-2 pr-3">
-                      {p.department_id
-                        ? (depMap[p.department_id] || `#${shortId(p.department_id)}`)
-                        : <span className="text-gray-500">(Chưa gán)</span>}
-                    </td>
-                    <td className="py-2 pr-3">
-                      {p.framework_id
-                        ? (() => {
-                            const f = frameworks.find(x => x.id === p.framework_id);
-                            return fwLabel(f, p.framework_id);
-                          })()
-                        : <span className="text-gray-500">(Chưa gán)</span>}
-                    </td>
+
+                    {isLecturer && (
+                      <td className="py-2 pr-3">
+                        {p.department_id
+                          ? (depMap[p.department_id] || `#${shortId(p.department_id)}`)
+                          : <span className="text-gray-500">(Chưa gán)</span>}
+                      </td>
+                    )}
+
+                    {isStudent && (
+                      <td className="py-2 pr-3">
+                        {p.framework_id
+                          ? (() => {
+                              const f = frameworks.find(x => x.id === p.framework_id);
+                              return fwLabel(f, p.framework_id);
+                            })()
+                          : <span className="text-gray-500">(Chưa gán)</span>}
+                      </td>
+                    )}
+
                     <td className="py-2 pr-3">{p.role === 'lecturer' ? 'Giảng viên' : 'Sinh viên'}</td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td className="py-6 text-center text-sm text-gray-500" colSpan={6}>
+                  <td className="py-6 text-center text-sm text-gray-500" colSpan={isLecturer ? 6 : 6}>
                     {loading ? 'Đang tải…' : 'Không có dữ liệu'}
                   </td>
                 </tr>
