@@ -3,49 +3,42 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { getSupabaseFromRequest } from '@/lib/supabaseServer';
+import { createServiceClient } from '@/lib/supabaseServer'; // SERVICE ROLE!
 
 export async function POST(req: Request) {
-  const sb = getSupabaseFromRequest(req);
-  const body = await req.json().catch(() => ({}));
-  const { form_id, evaluatee_user_id } = body || {};
+  try {
+    const sb = createServiceClient(); // bypass RLS
+    const { form_id, evaluatee_user_id } = await req.json();
 
-  if (!form_id || !evaluatee_user_id) {
-    return NextResponse.json({ error: 'Thiếu form_id / evaluatee_user_id' }, { status: 400 });
+    if (!form_id || !evaluatee_user_id) {
+      return NextResponse.json({ error: 'Thiếu form_id/evaluatee_user_id' }, { status: 400 });
+    }
+
+    // Xác thực form còn active + lấy rubric_id
+    const { data: form, error: ferr } = await sb
+      .from('eval360_forms')
+      .select('id, rubric_id, status')
+      .eq('id', form_id)
+      .eq('status', 'active')
+      .single();
+    if (ferr || !form) return NextResponse.json({ error: 'Form không tồn tại/không hoạt động' }, { status: 400 });
+
+    // Tạo evaluation_request (KHÔNG chèn rubric_id nếu schema không có cột này)
+    const insertPayload: any = {
+      form_id,
+      evaluatee_user_id,   // SV được đánh giá
+      // rater_user_id: null // nếu muốn lưu người chấm đã đăng nhập thì set = auth user id
+    };
+
+    const { data: reqRow, error: ierr } = await sb
+      .from('evaluation_requests')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+    if (ierr) return NextResponse.json({ error: ierr.message }, { status: 400 });
+
+    return NextResponse.json({ request_id: reqRow.id });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
-
-  // Lấy form để kiểm tra active và lấy rubric_id, group_code dùng về sau
-  const { data: form, error: fErr } = await sb
-    .from('eval360_forms')
-    .select('id, rubric_id, group_code, status')
-    .eq('id', form_id)
-    .single();
-
-  if (fErr || !form) {
-    return NextResponse.json({ error: 'Form không tồn tại' }, { status: 404 });
-  }
-  if (form.status !== 'active') {
-    return NextResponse.json({ error: 'Form không còn hoạt động' }, { status: 400 });
-  }
-
-  // Insert request: chỉ cần form_id để qua RLS; các cột khác tuỳ schema của bạn
-  const insertObj: any = {
-    form_id,
-    evaluatee_user_id,
-    // nếu bảng bạn có group_code / rubric_id thì có thể set thêm, bằng dữ liệu từ form:
-    // group_code: form.group_code,
-    // rubric_id: form.rubric_id,
-  };
-
-  const { data: ins, error: iErr } = await sb
-    .from('evaluation_requests')
-    .insert(insertObj)
-    .select('id')
-    .single();
-
-  if (iErr) {
-    return NextResponse.json({ error: iErr.message }, { status: 400 });
-  }
-
-  return NextResponse.json({ request_id: ins.id });
 }
