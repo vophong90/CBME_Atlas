@@ -37,6 +37,7 @@ type Campaign = {
   rubric_id: string;
 };
 
+/** ===== Quyền ===== */
 function truthy(x: any) {
   return x === true || x === 'true' || x === 1 || x === '1';
 }
@@ -95,6 +96,21 @@ function isoLocal(d: Date) {
   return `${y}-${m}-${day}T${h}:${min}`;
 }
 
+/** Hiển thị tiếng Việt cho group/status */
+const GROUP_VI: Record<FormRow['group_code'], string> = {
+  faculty: 'Giảng viên',
+  peer: 'Sinh viên đánh giá nhau',
+  self: 'Sinh viên tự đánh giá',
+  supervisor: 'Người hướng dẫn',
+  patient: 'Bệnh nhân',
+};
+const STATUS_VI: Record<FormRow['status'], string> = {
+  active: 'Kích hoạt',
+  inactive: 'Ngừng',
+};
+const labelGroup = (g: FormRow['group_code']) => GROUP_VI[g] || g;
+const labelStatus = (s: FormRow['status']) => STATUS_VI[s] || s;
+
 export default function Eval360FormsPage() {
   const router = useRouter();
   const { profile, loading } = useAuth();
@@ -142,7 +158,7 @@ export default function Eval360FormsPage() {
   const [err, setErr] = useState('');
 
   // ===== Campaign Manager state =====
-  const [managerFormId, setManagerFormId] = useState<string>('');
+  const [managerFormId, setManagerFormId] = useState<string>(''); // chọn form từ dropdown
   const [selectedForm, setSelectedForm] = useState<FormRow | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campLoading, setCampLoading] = useState(false);
@@ -157,11 +173,11 @@ export default function Eval360FormsPage() {
     if (!allowed) router.replace('/360-eval/evaluate');
   }, [loading, allowed, router]);
 
-  // Load dropdown rubrics
+  // Load dropdown rubrics (để "use existing")
   useEffect(() => {
     (async () => {
       try {
-        const d = await fetchJson('/api/rubrics/list', { credentials: 'include' });
+        const d = await fetchJson('/api/rubrics/list');
         setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: x.title as string })));
       } catch {
         setRubrics([]);
@@ -173,7 +189,7 @@ export default function Eval360FormsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const d = await fetchJson('/api/frameworks', { credentials: 'include' });
+        const d = await fetchJson('/api/frameworks');
         const items = (d.items || []).map((x: any) => ({
           id: x.id,
           label: x.label ?? `${x.doi_tuong} • ${x.chuyen_nganh} • ${x.nien_khoa}`,
@@ -202,7 +218,7 @@ export default function Eval360FormsPage() {
 
       for (const url of candidateUrls) {
         try {
-          const r = await fetch(url, { credentials: 'include' });
+          const r = await fetch(url);
           if (!r.ok) continue;
           const d = await r.json().catch(() => ({}));
           const norm = normalizeCourses(d);
@@ -218,6 +234,7 @@ export default function Eval360FormsPage() {
     })();
   }, [frameworkId]);
 
+  /** Lấy danh sách form (dành cho QA/Admin): dùng /api/360/form/manage */
   async function loadList() {
     setLoadingList(true);
     setErr('');
@@ -225,9 +242,8 @@ export default function Eval360FormsPage() {
       const params = new URLSearchParams();
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (groupFilter !== 'all') params.set('group_code', groupFilter);
-      // 🔴 DÙNG endpoint quản trị, KHÔNG lọc theo campaign
       const url = `/api/360/form/manage${params.toString() ? `?${params.toString()}` : ''}`;
-      const d = await fetchJson(url, { credentials: 'include' });
+      const d = await fetchJson(url);
       setItems(d.items || []);
     } catch (e: any) {
       setItems([]);
@@ -309,65 +325,20 @@ export default function Eval360FormsPage() {
                   : String(Date.now()),
               label: 'Criterion',
             },
-          ]
+          ],
     );
-  }
-
-  // Tạo rubric mới (nếu builder mode)
-  async function createRubricViaAPI(payload: {
-    title: string;
-    threshold: number;
-    framework_id: string | null;
-    course_code: string | null;
-    definition: RubricDef;
-  }): Promise<string> {
-    // Ưu tiên endpoint /api/rubrics/create, fallback /api/rubrics
-    const tryUrls = ['/api/rubrics/create', '/api/rubrics'];
-    let lastErr: any = null;
-    for (const url of tryUrls) {
-      try {
-        const d = await fetchJson(url, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const newId =
-          d?.item?.id || d?.rubric?.id || d?.id || d?.data?.id || d?.created?.id || null;
-        if (!newId) throw new Error('API chưa trả về id rubric');
-        return String(newId);
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr ?? new Error('Không tạo được rubric');
   }
 
   async function save() {
     try {
       if (!title.trim()) return setErr('Thiếu tiêu đề biểu mẫu.');
-      let finalRubricId = rubricId;
-
       if (useExistingRubric) {
-        if (!finalRubricId) return setErr('Chưa chọn rubric.');
+        if (!rubricId) return setErr('Chưa chọn rubric.');
       } else {
         if (!rbTitle.trim()) return setErr('Thiếu tiêu đề rubric.');
         if (!rbCols.length || !rbRows.length) return setErr('Rubric phải có ít nhất 1 cột & 1 tiêu chí.');
-        if (!frameworkId || !courseCode)
-          return setErr('Vui lòng chọn Khung CTĐT và Học phần để lưu rubric.');
-        // tạo rubric mới
-        finalRubricId = await createRubricViaAPI({
-          title: rbTitle.trim(),
-          threshold: rbThreshold,
-          framework_id: frameworkId || null,
-          course_code: courseCode || null,
-          definition: { columns: rbCols, rows: rbRows },
-        });
-        // refresh dropdown rubrics
-        try {
-          const d = await fetchJson('/api/rubrics/list', { credentials: 'include' });
-          setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: x.title as string })));
-        } catch {}
+        // Nếu muốn ràng buộc rubric với học phần:
+        if (!frameworkId || !courseCode) return setErr('Vui lòng chọn Khung CTĐT và Học phần để lưu rubric.');
       }
 
       setSaving(true);
@@ -378,17 +349,24 @@ export default function Eval360FormsPage() {
         title: title.trim(),
         group_code: group,
         status,
-        rubric_id: finalRubricId,
-        // NOTE: form có thể (hoặc không) ràng buộc khung/học phần — giữ nếu bạn muốn:
-        framework_id: frameworkId || null,
-        course_code: courseCode || null,
       };
 
-      // 🔴 DÙNG endpoint quản trị để lưu
-      await fetchJson('/api/360/form/manage', {
+      if (useExistingRubric) {
+        body.rubric_id = rubricId;
+      } else {
+        const def: RubricDef = { columns: rbCols, rows: rbRows };
+        body.new_rubric = {
+          title: rbTitle.trim(),
+          threshold: rbThreshold,
+          framework_id: frameworkId || null,
+          course_code: courseCode || null,
+          definition: def,
+        };
+      }
+
+      await fetchJson('/api/360/form', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(body),
       });
 
@@ -404,10 +382,7 @@ export default function Eval360FormsPage() {
   async function remove(id: string) {
     if (!confirm('Xoá biểu mẫu này?')) return;
     try {
-      await fetchJson(`/api/360/form/manage?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
+      await fetchJson(`/api/360/form?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (editingId === id) resetForm();
       await loadList();
     } catch (e: any) {
@@ -431,9 +406,7 @@ export default function Eval360FormsPage() {
     setCampLoading(true);
     setCampErr('');
     try {
-      const d = await fetchJson(`/api/360/campaigns?form_id=${encodeURIComponent(formId)}`, {
-        credentials: 'include',
-      });
+      const d = await fetchJson(`/api/360/campaigns?form_id=${encodeURIComponent(formId)}`);
       setCampaigns(d.items || []);
       const now = new Date();
       const after7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -456,13 +429,8 @@ export default function Eval360FormsPage() {
       await fetchJson('/api/360/campaigns', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           form_id: selectedForm.id,
-          // gửi kèm meta để backend không cần lookup nếu muốn
-          rubric_id: selectedForm.rubric_id,
-          framework_id: selectedForm.framework_id ?? null,
-          course_code: selectedForm.course_code ?? null,
           name: `Đợt đánh giá ${now.toLocaleDateString('vi-VN')} (+${days}d)`,
           start_at: now.toISOString(),
           end_at: until.toISOString(),
@@ -484,12 +452,8 @@ export default function Eval360FormsPage() {
       await fetchJson('/api/360/campaigns', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           form_id: selectedForm.id,
-          rubric_id: selectedForm.rubric_id,
-          framework_id: selectedForm.framework_id ?? null,
-          course_code: selectedForm.course_code ?? null,
           name: campName.trim(),
           start_at: new Date(campStart).toISOString(),
           end_at: new Date(campEnd).toISOString(),
@@ -507,7 +471,6 @@ export default function Eval360FormsPage() {
       await fetchJson(`/api/360/campaigns?id=${id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ action: 'close_now' }),
       });
       if (selectedForm) await loadCampaigns(selectedForm.id);
@@ -806,8 +769,8 @@ export default function Eval360FormsPage() {
                 {items.map((it) => (
                   <tr key={it.id}>
                     <td className="border px-3 py-2">{it.title}</td>
-                    <td className="border px-3 py-2 text-center">{it.group_code}</td>
-                    <td className="border px-3 py-2 text-center">{it.status}</td>
+                    <td className="border px-3 py-2 text-center">{labelGroup(it.group_code)}</td>
+                    <td className="border px-3 py-2 text-center">{labelStatus(it.status)}</td>
                     <td className="border px-3 py-2 text-right">
                       <button
                         onClick={() => selectFormForCampaign(it.id)}
@@ -840,7 +803,7 @@ export default function Eval360FormsPage() {
         )}
       </div>
 
-      {/* Campaign Manager */}
+      {/* Campaign Manager (luôn hiển thị) */}
       <div className="rounded-xl border bg-white p-4">
         <div className="mb-2 font-semibold">Quản lý Campaigns</div>
 
@@ -853,7 +816,7 @@ export default function Eval360FormsPage() {
             <option value="">{items.length ? '— Chọn biểu mẫu —' : '— Chưa có biểu mẫu —'}</option>
             {items.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.title} ({f.group_code})
+                {f.title} ({labelGroup(f.group_code)})
               </option>
             ))}
           </select>
