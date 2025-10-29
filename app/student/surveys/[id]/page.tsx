@@ -6,19 +6,14 @@ import { getSupabase } from '@/lib/supabase-browser';
 
 type QType = 'single' | 'multi' | 'text';
 
-type Survey = {
-  id: string;
-  title: string;
-  status: 'draft' | 'active' | 'inactive' | 'archived';
-};
-
 type Question = {
   id: string;
   text: string;
   qtype: QType;
   required: boolean;
   sort_order: number;
-  options: string[] | null; // lấy từ jsonb
+  // Các nhãn lựa chọn đã chuẩn hoá từ options (builder lưu {choices:[{id,label}]})
+  optLabels: string[];
 };
 
 type AnswerRow = {
@@ -46,7 +41,7 @@ export default function StudentDoSurveyPage() {
 
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [survey, setSurvey] = useState<Survey | null>(null);
+  const [surveyTitle, setSurveyTitle] = useState<string>('Khảo sát');
   const [responseId, setResponseId] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
@@ -54,7 +49,6 @@ export default function StudentDoSurveyPage() {
   const [form, setForm] = useState<FormState>({});
 
   async function ensureResponseRow(uid: string) {
-    // 1) tìm response hiện hữu
     const q1 = await supabase
       .from('survey_responses')
       .select('id,is_submitted,submitted_at')
@@ -70,14 +64,11 @@ export default function StudentDoSurveyPage() {
       return q1.data.id as string;
     }
 
-    // 2) chưa có → tạo
-    const ins = await supabase.from('survey_responses').insert([
-      {
-        survey_id: surveyId,
-        respondent_id: uid,
-        is_submitted: false,
-      },
-    ]).select('id').single();
+    const ins = await supabase
+      .from('survey_responses')
+      .insert([{ survey_id: surveyId, respondent_id: uid, is_submitted: false }])
+      .select('id')
+      .single();
 
     if (ins.error) throw ins.error;
     setResponseId(ins.data.id);
@@ -85,28 +76,50 @@ export default function StudentDoSurveyPage() {
     return ins.data.id as string;
   }
 
+  // Chuẩn hoá options JSONB từ nhiều khả năng:
+  // - { choices: [{id,label}], ... }
+  // - { options: string[] }
+  // - string[]
+  function normalizeOptionLabels(options: any): string[] {
+    if (!options) return [];
+    if (Array.isArray(options)) {
+      // Lưu thẳng mảng string
+      return options.filter((x) => typeof x === 'string');
+    }
+    if (Array.isArray(options?.choices)) {
+      // Lấy label từ choices
+      return options.choices
+        .map((c: any) => (typeof c === 'string' ? c : c?.label))
+        .filter((x: any) => typeof x === 'string');
+    }
+    if (Array.isArray(options?.options)) {
+      // Trường hợp bạn từng lưu { options: [...] }
+      return options.options.filter((x: any) => typeof x === 'string');
+    }
+    return [];
+  }
+
   async function load() {
     setLoading(true);
     setToast(null);
     try {
-      // Lấy user
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id;
       if (!uid) throw new Error('Không xác thực được người dùng');
 
-      // 1) Survey
+      // 1) Info Survey
       const sRes = await supabase
         .from('surveys')
         .select('id,title,status')
         .eq('id', surveyId)
         .single();
       if (sRes.error) throw sRes.error;
-      setSurvey(sRes.data as Survey);
+      setSurveyTitle(sRes.data?.title || 'Khảo sát');
 
-      // 2) Tạo/tìm survey_responses
+      // 2) Đảm bảo có response
       const rid = await ensureResponseRow(uid);
 
-      // 3) Câu hỏi
+      // 3) Câu hỏi (NHỚ select cả "options")
       const qRes = await supabase
         .from('survey_questions')
         .select('id,text,qtype,required,sort_order,options')
@@ -114,23 +127,22 @@ export default function StudentDoSurveyPage() {
         .order('sort_order', { ascending: true });
       if (qRes.error && qRes.error.code !== '42P01') throw qRes.error;
 
-      const qs = (qRes.data ?? []).map((q: any) => ({
+      const qs: Question[] = (qRes.data ?? []).map((q: any) => ({
         id: q.id,
         text: q.text,
         qtype: q.qtype as QType,
         required: !!q.required,
         sort_order: q.sort_order ?? 0,
-        options: Array.isArray(q.options) ? q.options : q.options?.options ?? null, // phòng trường hợp options dạng {options:[...]}
-      })) as Question[];
+        optLabels: normalizeOptionLabels(q.options),
+      }));
 
       setQuestions(qs);
 
-      // 4) Câu trả lời cũ (nếu có)
+      // 4) Câu trả lời hiện có
       const aRes = await supabase
         .from('survey_answers')
         .select('response_id,question_id,option,free_text')
         .eq('response_id', rid);
-
       if (aRes.error && aRes.error.code !== '42P01') throw aRes.error;
 
       const formInit: FormState = {};
@@ -190,7 +202,6 @@ export default function StudentDoSurveyPage() {
 
   async function persistAnswers() {
     if (!responseId) throw new Error('Thiếu response id');
-    // Xoá & chèn mới cho từng câu (đơn giản, an toàn với các unique index)
     for (const q of questions) {
       const del = await supabase
         .from('survey_answers')
@@ -255,7 +266,6 @@ export default function StudentDoSurveyPage() {
         setToast({ type: 'error', text: 'Phiếu đã gửi, không thể gửi lại.' });
         return;
       }
-      // kiểm tra bắt buộc
       const errs = Object.keys(requiredErrors);
       if (errs.length > 0) {
         const firstQ = errs[0];
@@ -267,7 +277,6 @@ export default function StudentDoSurveyPage() {
         setSubmitting(false);
         return;
       }
-      // lưu & đánh dấu submit
       await persistAnswers();
       const upd = await supabase
         .from('survey_responses')
@@ -277,7 +286,6 @@ export default function StudentDoSurveyPage() {
 
       setIsSubmitted(true);
       setToast({ type: 'success', text: 'Đã gửi nộp khảo sát. Cảm ơn bạn!' });
-      // tuỳ ý: router.refresh();
     } catch (e: any) {
       setToast({ type: 'error', text: e.message ?? 'Gửi nộp thất bại' });
     } finally {
@@ -288,16 +296,7 @@ export default function StudentDoSurveyPage() {
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">
-          {survey?.title || 'Khảo sát'}
-        </h1>
-        {survey?.status && (
-          <div className="mt-1 text-sm text-slate-600">
-            Trạng thái: <b>{survey.status === 'active' ? 'Đang hoạt động' :
-            survey.status === 'inactive' ? 'Tạm dừng' :
-            survey.status === 'archived' ? 'Lưu trữ' : 'Nháp'}</b>
-          </div>
-        )}
+        <h1 className="text-2xl font-semibold">{surveyTitle}</h1>
       </div>
 
       {loading && <div className="text-sm text-slate-600">Đang tải…</div>}
@@ -316,14 +315,13 @@ export default function StudentDoSurveyPage() {
                   <div className="mt-0.5 text-slate-500">{i + 1}.</div>
                   <div className="flex-1">
                     <div className="font-medium">
-                      {q.text}{' '}
-                      {q.required && <span className="text-red-600">*</span>}
+                      {q.text} {q.required && <span className="text-red-600">*</span>}
                     </div>
 
                     {/* SINGLE */}
                     {q.qtype === 'single' && (
                       <div className="mt-2 space-y-2">
-                        {(q.options ?? []).map((opt) => (
+                        {q.optLabels.map((opt) => (
                           <label key={opt} className="flex items-center gap-2">
                             <input
                               type="radio"
@@ -341,7 +339,7 @@ export default function StudentDoSurveyPage() {
                     {/* MULTI */}
                     {q.qtype === 'multi' && (
                       <div className="mt-2 space-y-2">
-                        {(q.options ?? []).map((opt) => {
+                        {q.optLabels.map((opt) => {
                           const checked = (form[q.id]?.multi || []).includes(opt);
                           return (
                             <label key={opt} className="flex items-center gap-2">
@@ -371,9 +369,7 @@ export default function StudentDoSurveyPage() {
                       </div>
                     )}
 
-                    {err && (
-                      <div className="mt-2 text-xs text-red-600">{err}</div>
-                    )}
+                    {err && <div className="mt-2 text-xs text-red-600">{err}</div>}
                   </div>
                 </div>
               </div>
@@ -395,11 +391,9 @@ export default function StudentDoSurveyPage() {
               onClick={onSubmit}
               className={`px-3 py-2 rounded text-white ${submitting || isSubmitted ? 'bg-gray-400' : 'bg-black'}`}
             >
-              {isSubmitted ? 'Đã gửi' : (submitting ? 'Đang gửi…' : 'Gửi nộp')}
+              {isSubmitted ? 'Đã gửi' : submitting ? 'Đang gửi…' : 'Gửi nộp'}
             </button>
-            {isSubmitted && (
-              <div className="text-sm text-green-700">Bạn đã gửi khảo sát này.</div>
-            )}
+            {isSubmitted && <div className="text-sm text-green-700">Bạn đã gửi khảo sát này.</div>}
           </div>
 
           {toast && (
