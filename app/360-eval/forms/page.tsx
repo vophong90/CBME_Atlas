@@ -1,3 +1,4 @@
+// app/360-eval/forms/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -17,15 +18,15 @@ type FormRow = {
   updated_at?: string;
 };
 
-type RubricOpt = { id: string; title: string };
-
-type FrameworkOpt = { id: string; label: string };
-type CourseOpt    = { course_code: string; course_name?: string|null };
+type RubricOpt   = { id: string; title: string };
+type FrameworkOpt= { id: string; label: string };
+type CourseOpt   = { course_code: string; course_name?: string|null };
 
 type RubricColumn = { key: string; label: string };
 type RubricRow    = { id: string; label: string; clo_ids?: string[] };
 type RubricDef    = { columns: RubricColumn[]; rows: RubricRow[] };
 
+/** ===== Role helpers ===== */
 function truthy(x: any) { return x === true || x === 'true' || x === 1 || x === '1'; }
 function canSeeQA(profile: any): boolean {
   if (!profile) return false;
@@ -37,11 +38,11 @@ function canSeeQA(profile: any): boolean {
   return false;
 }
 
-/** ===== Helpers ===== */
+/** ===== Defaults ===== */
 const DEFAULT_COLS: RubricColumn[] = [
-  { key: 'na',  label: 'Not achieved' },
-  { key: 'ach', label: 'Achieved' },
-  { key: 'good',label: 'Good' },
+  { key: 'na',   label: 'Not achieved' },
+  { key: 'ach',  label: 'Achieved' },
+  { key: 'good', label: 'Good' },
 ];
 
 export default function Eval360FormsPage() {
@@ -57,8 +58,8 @@ export default function Eval360FormsPage() {
 
   // ===== Form meta (create/edit) =====
   const [editingId, setEditingId] = useState<string|undefined>();
-  const [title, setTitle] = useState('');
-  const [group, setGroup] = useState<FormRow['group_code']>('peer');
+  const [title, setTitle]   = useState('');
+  const [group, setGroup]   = useState<FormRow['group_code']>('peer');
   const [status, setStatus] = useState<FormRow['status']>('active');
 
   // ===== Rubric mode: pick existing OR build new =====
@@ -71,7 +72,7 @@ export default function Eval360FormsPage() {
   const [rbThreshold, setRbThreshold] = useState<number>(70);
   const [rbCols, setRbCols] = useState<RubricColumn[]>(DEFAULT_COLS);
   const [rbRows, setRbRows] = useState<RubricRow[]>([
-    { id: crypto.randomUUID(), label: 'Professionalism' },
+    { id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()), label: 'Professionalism' },
   ]);
 
   // cần framework/course do schema rubrics yêu cầu NOT NULL
@@ -95,31 +96,53 @@ export default function Eval360FormsPage() {
       try {
         const r = await fetch('/api/rubrics/list');
         const d = await r.json();
-        setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: x.title as string })));
-      } catch { setRubrics([]); }
+        setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: String(x.title) })));
+      } catch {
+        setRubrics([]);
+      }
     })();
   }, []);
 
-  // Load frameworks
+  // Load frameworks (API trả {id,label}; fallback khi trả raw fields)
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/frameworks');
         const d = await r.json();
-        setFrameworks((d.items || []).map((x: any) => ({ id: x.id, label: `${x.doi_tuong} • ${x.chuyen_nganh} • ${x.nien_khoa}` })));
-      } catch { setFrameworks([]); }
+        setFrameworks(
+          (d.items || []).map((x: any) => ({
+            id: x.id,
+            label: x.label ?? [x.doi_tuong, x.chuyen_nganh, x.nien_khoa].filter(Boolean).join(' • '),
+          }))
+        );
+      } catch {
+        setFrameworks([]);
+      }
     })();
   }, []);
 
-  // Load courses theo framework
+  // Load courses theo framework (dùng API đang có ở Academic Affairs)
   useEffect(() => {
     (async () => {
       if (!frameworkId) { setCourses([]); setCourseCode(''); return; }
       try {
-        const r = await fetch(`/api/courses/list?framework_id=${encodeURIComponent(frameworkId)}`);
+        const params = new URLSearchParams({
+          framework_id: frameworkId,
+          page: '1',
+          page_size: '500',
+        });
+        const r = await fetch(`/api/academic-affairs/courses/list?${params.toString()}`);
         const d = await r.json();
-        setCourses((d.items || []) as CourseOpt[]);
-      } catch { setCourses([]); }
+        const raw = Array.isArray(d.items) ? d.items : [];
+        // Map linh hoạt: course_code/course_name hoặc code/name
+        const mapped: CourseOpt[] = raw.map((x: any) => ({
+          course_code: x.course_code ?? x.code,
+          course_name: x.course_name ?? x.name ?? null,
+        })).filter((x: CourseOpt) => Boolean(x.course_code));
+        setCourses(mapped);
+      } catch {
+        setCourses([]);
+      }
     })();
   }, [frameworkId]);
 
@@ -136,13 +159,13 @@ export default function Eval360FormsPage() {
       if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách biểu mẫu');
       setItems(d.items || []);
     } catch (e: any) {
-      setItems([]); setErr(e?.message || 'Lỗi tải danh sách');
+      setItems([]);
+      setErr(e?.message || 'Lỗi tải danh sách');
     } finally {
       setLoadingList(false);
     }
   }
-
-  useEffect(() => { if (allowed) loadList(); }, [allowed, statusFilter, groupFilter]);
+  useEffect(() => { if (allowed) loadList(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [allowed, statusFilter, groupFilter]);
 
   function resetForm() {
     setEditingId(undefined);
@@ -151,7 +174,7 @@ export default function Eval360FormsPage() {
     setRubricId('');
     setRbTitle(''); setRbThreshold(70);
     setRbCols(DEFAULT_COLS);
-    setRbRows([{ id: crypto.randomUUID(), label: 'Professionalism' }]);
+    setRbRows([{ id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()), label: 'Professionalism' }]);
     setFrameworkId(''); setCourseCode('');
     setErr('');
   }
@@ -179,10 +202,11 @@ export default function Eval360FormsPage() {
     const next = rbCols.slice(); next.splice(idx,1); setRbCols(next);
   }
   function addRow() {
-    setRbRows([...rbRows, { id: crypto.randomUUID(), label: `Criterion ${rbRows.length+1}` }]);
+    setRbRows([...rbRows, { id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()+Math.random()), label: `Criterion ${rbRows.length+1}` }]);
   }
   function delRow(idx: number) {
-    const next = rbRows.slice(); next.splice(idx,1); setRbRows(next.length ? next : [{ id: crypto.randomUUID(), label: 'Criterion' }]);
+    const next = rbRows.slice(); next.splice(idx,1);
+    setRbRows(next.length ? next : [{ id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()), label: 'Criterion' }]);
   }
 
   async function save() {
@@ -249,14 +273,14 @@ export default function Eval360FormsPage() {
     }
   }
 
-  if (loading)    return <div className="rounded-xl border bg-white p-4 text-sm text-slate-600">Đang tải quyền…</div>;
-  if (!allowed)   return <div className="rounded-xl border bg-white p-4 text-sm text-slate-600">Bạn không có quyền.</div>;
+  if (loading)  return <div className="rounded-xl border bg-white p-4 text-sm text-slate-600">Đang tải quyền…</div>;
+  if (!allowed) return <div className="rounded-xl border bg-white p-4 text-sm text-slate-600">Bạn không có quyền.</div>;
 
   return (
     <div className="space-y-4">
       {/* Builder card */}
       <div className="rounded-xl border bg-white p-4">
-        <div className="font-semibold mb-2">{editingId ? 'Sửa biểu mẫu 360°' : 'Tạo biểu mẫu 360°'}</div>
+        <div className="mb-2 font-semibold">{editingId ? 'Sửa biểu mẫu 360°' : 'Tạo biểu mẫu 360°'}</div>
 
         {err && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
 
@@ -338,7 +362,7 @@ export default function Eval360FormsPage() {
                     placeholder="Ngưỡng đạt (%)"
                     className="rounded-lg border px-3 py-2 text-sm"
                   />
-                  <div className="text-xs text-slate-500 flex items-center">Ngưỡng tổng thể để coi là đạt</div>
+                  <div className="flex items-center text-xs text-slate-500">Ngưỡng tổng thể để coi là đạt</div>
                 </div>
 
                 {/* Framework & Course (bắt buộc để lưu rubric) */}
@@ -381,8 +405,8 @@ export default function Eval360FormsPage() {
                             setRbCols(next);
                           }}
                           className="w-40 rounded-lg border px-3 py-1.5 text-sm"
-                          placeholder="key"
-                          title="Khoá (ví dụ: na/ach/good)"
+                          placeholder="key (na/ach/good...)"
+                          title="Khoá mức"
                         />
                         <input
                           value={c.label}
@@ -499,7 +523,7 @@ export default function Eval360FormsPage() {
                   <th className="border px-3 py-2 text-left">Tiêu đề</th>
                   <th className="border px-3 py-2">Nhóm</th>
                   <th className="border px-3 py-2">Trạng thái</th>
-                  <th className="border px-3 py-2 w-40"></th>
+                  <th className="w-40 border px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
