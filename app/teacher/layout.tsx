@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { getSupabase } from '@/lib/supabase-browser';
+import { ClipboardList } from 'lucide-react';
 
 /* ===== Inline icons (no deps) ===== */
 const MenuIcon = (p: any) => (
@@ -54,7 +55,7 @@ const NAV = [
   { href: '/teacher/student',  label: 'Thông tin SV', desc: 'Tra cứu & CLO chưa đạt', Icon: GraduationCap },
   { href: '/teacher/feedback', label: 'Phản hồi (GV → SV)', desc: 'Gợi ý cải thiện', Icon: MessageSquare },
   { href: '/teacher/inbox',    label: 'Hộp thư góp ý', desc: 'Ẩn danh từ SV', Icon: InboxIcon },
-  { href: '/teacher/surveys', label: 'Khảo sát', desc: 'Khảo sát dành cho GV', Icon: ClipboardIcon },
+  { href: '/teacher/surveys', label: 'Khảo sát', desc: 'Khảo sát dành cho GV', Icon: ClipboardList },
 
 ];
 
