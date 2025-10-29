@@ -13,6 +13,8 @@ type FormRow = {
   framework_id?: string | null;
   course_code?: string | null;
   status: 'active' | 'inactive';
+  // server GET có trả updated_at -> để sort nếu có
+  updated_at?: string | null;
 };
 
 type RubricOpt = { id: string; title: string };
@@ -26,7 +28,6 @@ function canSeeQA(profile: any): boolean {
   const arr = Array.isArray(profile.roles) ? profile.roles : [];
   if (arr.includes('admin') || arr.includes('qa')) return true;
   if (truthy(profile.is_admin) || truthy(profile.is_qa)) return true;
-  // alias dự phòng
   if (truthy((profile as any).admin) || truthy((profile as any).qa)) return true;
   return false;
 }
@@ -35,18 +36,17 @@ export default function Eval360FormsPage() {
   const router = useRouter();
   const { profile, loading } = useAuth();
 
-  // Quyền
   const allowed = useMemo(() => canSeeQA(profile), [profile]);
 
-  // Danh sách
+  // List
   const [items, setItems] = useState<FormRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
 
-  // Bộ lọc
+  // Filters
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [groupFilter, setGroupFilter] = useState<'all' | FormRow['group_code']>('all');
 
-  // Form create/edit
+  // Create/Edit
   const [title, setTitle] = useState('');
   const [group, setGroup] = useState<FormRow['group_code']>('peer');
   const [rubricId, setRubricId] = useState('');
@@ -56,19 +56,19 @@ export default function Eval360FormsPage() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
-  // Redirect nếu không đủ quyền (chỉ chạy sau khi loading=false)
+  // Redirect nếu không có quyền
   useEffect(() => {
     if (loading) return;
     if (!allowed) router.replace('/360-eval/evaluate');
   }, [loading, allowed, router]);
 
-  // Nạp rubrics (phục vụ dropdown chọn rubric)
+  // Nạp rubrics cho combobox
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/rubrics/list');
         const d = await r.json();
-        setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: x.title as string })));
+        setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: String(x.title) })));
       } catch {
         setRubrics([]);
       }
@@ -76,18 +76,54 @@ export default function Eval360FormsPage() {
   }, []);
 
   async function load() {
+    if (!allowed) return;
     setLoadingList(true);
     setErrorMsg('');
     try {
-      const params = new URLSearchParams();
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (groupFilter !== 'all') params.set('group_code', groupFilter);
+      // helper build params
+      const makeParams = (st: 'active' | 'inactive') => {
+        const qs = new URLSearchParams();
+        qs.set('status', st);
+        if (groupFilter !== 'all') qs.set('group_code', groupFilter);
+        return qs.toString();
+      };
 
-      const url = `/api/360/forms${params.toString() ? `?${params.toString()}` : ''}`;
-      const r = await fetch(url);
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách biểu mẫu');
-      setItems(d.items || []);
+      if (statusFilter === 'all') {
+        // gọi cả active + inactive rồi gộp
+        const [ra, ri] = await Promise.all([
+          fetch(`/api/360/forms?${makeParams('active')}`),
+          fetch(`/api/360/forms?${makeParams('inactive')}`),
+        ]);
+        const [da, di] = await Promise.all([ra.json(), ri.json()]);
+        if (!ra.ok) throw new Error(da?.error || 'Không tải được danh sách (active)');
+        if (!ri.ok) throw new Error(di?.error || 'Không tải được danh sách (inactive)');
+
+        const merged: FormRow[] = [...(da.items || []), ...(di.items || [])];
+
+        // sort theo updated_at mới nhất nếu có, fallback theo title
+        merged.sort((a, b) => {
+          const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
+          const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
+          if (tb !== ta) return tb - ta;
+          return String(a.title).localeCompare(String(b.title), 'vi');
+        });
+
+        setItems(merged);
+      } else {
+        const qs = makeParams(statusFilter);
+        const r = await fetch(`/api/360/forms?${qs}`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách biểu mẫu');
+
+        const rows: FormRow[] = d.items || [];
+        rows.sort((a, b) => {
+          const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
+          const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
+          if (tb !== ta) return tb - ta;
+          return String(a.title).localeCompare(String(b.title), 'vi');
+        });
+        setItems(rows);
+      }
     } catch (e: any) {
       setItems([]);
       setErrorMsg(e?.message || 'Lỗi tải danh sách');
@@ -96,9 +132,8 @@ export default function Eval360FormsPage() {
     }
   }
 
-  // Lần đầu & mỗi khi đổi filter
+  // Lần đầu & khi đổi filter
   useEffect(() => {
-    if (!allowed) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, statusFilter, groupFilter]);
@@ -124,7 +159,7 @@ export default function Eval360FormsPage() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          id: editingId, // có = cập nhật, không = tạo
+          id: editingId,
           title: title.trim(),
           group_code: group,
           rubric_id: rubricId,
@@ -169,7 +204,6 @@ export default function Eval360FormsPage() {
     return <div className="rounded-xl border bg-white p-4 text-sm text-slate-600">Đang tải quyền truy cập…</div>;
   }
   if (!allowed) {
-    // layout đã redirect; đoạn này chỉ là dự phòng
     return <div className="rounded-xl border bg-white p-4 text-sm text-slate-600">Bạn không có quyền truy cập.</div>;
   }
 
@@ -177,7 +211,7 @@ export default function Eval360FormsPage() {
     <div className="space-y-4">
       {/* Create / Edit */}
       <div className="rounded-xl border bg-white p-4">
-        <div className="font-semibold mb-2">{editingId ? 'Sửa biểu mẫu' : 'Tạo biểu mẫu'}</div>
+        <div className="mb-2 font-semibold">{editingId ? 'Sửa biểu mẫu' : 'Tạo biểu mẫu'}</div>
 
         {errorMsg && (
           <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -290,7 +324,7 @@ export default function Eval360FormsPage() {
                   <th className="border px-3 py-2 text-left">Tiêu đề</th>
                   <th className="border px-3 py-2">Nhóm</th>
                   <th className="border px-3 py-2">Trạng thái</th>
-                  <th className="border px-3 py-2 w-40"></th>
+                  <th className="w-40 border px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
