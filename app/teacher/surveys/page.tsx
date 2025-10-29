@@ -1,128 +1,134 @@
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+'use client';
 
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabaseServer';
+import React, { useEffect, useState } from 'react';
 
-export async function GET(req: Request) {
-  try {
-    const sb = createServerClient();
-    const {
-      data: { user },
-      error: authErr,
-    } = await sb.auth.getUser();
-    if (authErr || !user) {
-      return NextResponse.json({ error: authErr?.message ?? 'Unauthorized' }, { status: 401 });
-    }
+type Item = {
+  survey: {
+    id: string;
+    title: string;
+    status: 'draft' | 'active' | 'inactive' | 'archived';
+    created_at?: string;
+    updated_at?: string;
+    open_at?: string | null;
+    close_at?: string | null;
+  };
+  assignment: {
+    invited_at?: string | null;
+    role?: string | null;
+    department?: string | null;
+    cohort?: string | null;
+    unit?: string | null;
+  } | null;
+  response: {
+    id: string;
+    is_submitted: boolean;
+    submitted_at?: string | null;
+  } | null;
+  is_active: boolean;
+  is_submitted: boolean;
+  can_answer: boolean;
+  link?: string | null;
+};
 
-    // 1) Lấy assignments của GV hiện tại
-    const aRes = await sb
-      .from('survey_assignments')
-      .select('survey_id, role, department, cohort, unit, invited_at')
-      .eq('assigned_to', user.id);
+function CardSkel() {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 animate-pulse">
+      <div className="h-4 w-1/2 bg-slate-200 rounded" />
+      <div className="mt-2 h-3 w-1/3 bg-slate-200 rounded" />
+      <div className="mt-4 h-8 w-24 bg-slate-200 rounded" />
+    </div>
+  );
+}
 
-    if (aRes.error && aRes.error.code !== '42P01') {
-      return NextResponse.json({ error: aRes.error.message }, { status: 500 });
-    }
-    const assignments = (aRes.data ?? []) as Array<{
-      survey_id: string;
-      role: string | null;
-      department: string | null; // id bộ môn
-      cohort: string | null;
-      unit: string | null;
-      invited_at: string | null;
-    }>;
-
-    const surveyIds = assignments.map(a => a.survey_id);
-    if (!surveyIds.length) return NextResponse.json({ items: [] });
-
-    // 2) Map department_id -> name (nếu có bảng departments)
-    const deptIds = Array.from(
-      new Set(assignments.map(a => a.department).filter((v): v is string => !!v))
-    );
-    let deptMap = new Map<string, string>();
-    if (deptIds.length) {
-      const { data: depts, error: deptErr } = await sb
-        .from('departments')
-        .select('id,name')
-        .in('id', deptIds);
-      if (!deptErr && depts) {
-        deptMap = new Map((depts as any[]).map(d => [d.id as string, (d.name as string) ?? '']));
-      }
-    }
-
-    // 3) Thông tin survey
-    const sRes = await sb
-      .from('surveys')
-      .select('id, title, status, created_at, updated_at') // không include open_at/close_at nếu chưa có cột
-      .in('id', surveyIds);
-    if (sRes.error) return NextResponse.json({ error: sRes.error.message }, { status: 500 });
-    const surveys = sRes.data ?? [];
-
-    // 4) Response của chính GV
-    const rRes = await sb
-      .from('survey_responses')
-      .select('id, survey_id, is_submitted, submitted_at')
-      .eq('respondent_id', user.id)
-      .in('survey_id', surveyIds);
-    if (rRes.error && rRes.error.code !== '42P01') {
-      return NextResponse.json({ error: rRes.error.message }, { status: 500 });
-    }
-    const respBySurvey = new Map((rRes.data ?? []).map((r: any) => [r.survey_id, r]));
-
-    // 5) Tổng hợp
-    const items = (surveys as any[]).map((s) => {
-      const asg = assignments.find(a => a.survey_id === s.id) ?? null;
-      const department_name =
-        asg?.department ? (deptMap.get(asg.department) ?? null) : null;
-
-      const is_active = s.status === 'active';
-      const resp = asg ? respBySurvey.get(s.id) : null;
-      const is_submitted = !!resp?.is_submitted;
-      const can_answer = is_active && !is_submitted;
-
-      return {
-        survey: {
-          id: s.id,
-          title: s.title,
-          status: s.status,
-          created_at: s.created_at,
-          updated_at: s.updated_at,
-          open_at: null,
-          close_at: null,
-        },
-        assignment: asg
-          ? {
-              invited_at: asg.invited_at,
-              role: asg.role,
-              department: asg.department,         // id
-              department_name,                     // tên hiển thị
-              cohort: asg.cohort,
-              unit: asg.unit,
-            }
-          : null,
-        response: resp
-          ? {
-              id: resp.id,
-              is_submitted: resp.is_submitted,
-              submitted_at: resp.submitted_at,
-            }
-          : null,
-        is_active,
-        is_submitted,
-        can_answer,
-        link: null,
-      };
-    })
-    // Active trước, chưa nộp trước
-    .sort((a, b) => {
-      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
-      if (a.is_submitted !== b.is_submitted) return a.is_submitted ? 1 : -1;
-      return new Date(b.survey.created_at).getTime() - new Date(a.survey.created_at).getTime();
-    });
-
-    return NextResponse.json({ items });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
+function viStatus(s: Item['survey']['status']) {
+  switch (s) {
+    case 'active': return 'Đang mở';
+    case 'inactive': return 'Tạm ngưng';
+    case 'archived': return 'Lưu trữ';
+    default: return 'Nháp';
   }
+}
+
+export default function TeacherSurveysPage() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true); setErr(null);
+      try {
+        const r = await fetch('/api/teacher/surveys'); // có thể thêm ?active=...&submitted=...
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'Không tải được khảo sát');
+        setItems(j.items || []);
+      } catch (e: any) {
+        setErr(e?.message || 'Lỗi tải dữ liệu');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Khảo sát dành cho giảng viên</h2>
+      </div>
+
+      {loading && (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => <CardSkel key={i} />)}
+        </div>
+      )}
+
+      {!loading && err && <div className="text-sm text-red-600">Lỗi: {err}</div>}
+
+      {!loading && !err && (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {items.map((it) => {
+            const href = it.link || `/teacher/surveys/${it.survey.id}`;
+            return (
+              <div key={it.survey.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="font-semibold">{it.survey.title}</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Trạng thái: {viStatus(it.survey.status)}
+                </div>
+                {(it.survey.open_at || it.survey.close_at) && (
+                  <div className="text-xs text-slate-600 mt-1">
+                    {it.survey.open_at && <>Mở: {new Date(it.survey.open_at).toLocaleString()} · </>}
+                    {it.survey.close_at && <>Đóng: {new Date(it.survey.close_at).toLocaleString()}</>}
+                  </div>
+                )}
+                {it.assignment?.department && (
+                  <div className="text-xs text-slate-600 mt-1">Bộ môn: {it.assignment.department}</div>
+                )}
+                {it.assignment?.cohort && (
+                  <div className="text-xs text-slate-600 mt-0.5">Khung/Khóa: {it.assignment.cohort}</div>
+                )}
+                <div className="mt-4 flex items-center gap-2">
+                  {it.is_submitted ? (
+                    <a href={href} className="px-3 py-2 rounded border">
+                      Xem lại
+                    </a>
+                  ) : (
+                    <a
+                      href={href}
+                      className={`px-3 py-2 rounded text-white ${it.can_answer ? 'bg-black hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'}`}
+                      aria-disabled={!it.can_answer}
+                    >
+                      {it.can_answer ? 'Làm khảo sát' : 'Chưa thể làm'}
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {items.length === 0 && (
+            <div className="text-sm text-slate-500">Hiện chưa có khảo sát được mời.</div>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
