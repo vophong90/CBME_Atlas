@@ -123,7 +123,13 @@ export default function Eval360FormsPage() {
   const [rbThreshold, setRbThreshold] = useState<number>(70);
   const [rbCols, setRbCols] = useState<RubricColumn[]>(DEFAULT_COLS);
   const [rbRows, setRbRows] = useState<RubricRow[]>([
-    { id: typeof crypto !== 'undefined' && (crypto as any).randomUUID ? (crypto as any).randomUUID() : String(Date.now()), label: 'Professionalism' },
+    {
+      id:
+        typeof crypto !== 'undefined' && (crypto as any).randomUUID
+          ? (crypto as any).randomUUID()
+          : String(Date.now()),
+      label: 'Professionalism',
+    },
   ]);
 
   // framework/course
@@ -136,7 +142,7 @@ export default function Eval360FormsPage() {
   const [err, setErr] = useState('');
 
   // ===== Campaign Manager state =====
-  const [managerFormId, setManagerFormId] = useState<string>(''); // NEW: chọn form từ dropdown
+  const [managerFormId, setManagerFormId] = useState<string>('');
   const [selectedForm, setSelectedForm] = useState<FormRow | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campLoading, setCampLoading] = useState(false);
@@ -151,11 +157,11 @@ export default function Eval360FormsPage() {
     if (!allowed) router.replace('/360-eval/evaluate');
   }, [loading, allowed, router]);
 
-  // Load dropdown rubrics (để "use existing")
+  // Load dropdown rubrics
   useEffect(() => {
     (async () => {
       try {
-        const d = await fetchJson('/api/rubrics/list');
+        const d = await fetchJson('/api/rubrics/list', { credentials: 'include' });
         setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: x.title as string })));
       } catch {
         setRubrics([]);
@@ -167,7 +173,7 @@ export default function Eval360FormsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const d = await fetchJson('/api/frameworks');
+        const d = await fetchJson('/api/frameworks', { credentials: 'include' });
         const items = (d.items || []).map((x: any) => ({
           id: x.id,
           label: x.label ?? `${x.doi_tuong} • ${x.chuyen_nganh} • ${x.nien_khoa}`,
@@ -196,7 +202,7 @@ export default function Eval360FormsPage() {
 
       for (const url of candidateUrls) {
         try {
-          const r = await fetch(url);
+          const r = await fetch(url, { credentials: 'include' });
           if (!r.ok) continue;
           const d = await r.json().catch(() => ({}));
           const norm = normalizeCourses(d);
@@ -219,8 +225,9 @@ export default function Eval360FormsPage() {
       const params = new URLSearchParams();
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (groupFilter !== 'all') params.set('group_code', groupFilter);
-      const url = `/api/360/form${params.toString() ? `?${params.toString()}` : ''}`;
-      const d = await fetchJson(url);
+      // 🔴 DÙNG endpoint quản trị, KHÔNG lọc theo campaign
+      const url = `/api/360/form/manage${params.toString() ? `?${params.toString()}` : ''}`;
+      const d = await fetchJson(url, { credentials: 'include' });
       setItems(d.items || []);
     } catch (e: any) {
       setItems([]);
@@ -245,7 +252,13 @@ export default function Eval360FormsPage() {
     setRbThreshold(70);
     setRbCols(DEFAULT_COLS);
     setRbRows([
-      { id: typeof crypto !== 'undefined' && (crypto as any).randomUUID ? (crypto as any).randomUUID() : String(Date.now()), label: 'Professionalism' },
+      {
+        id:
+          typeof crypto !== 'undefined' && (crypto as any).randomUUID
+            ? (crypto as any).randomUUID()
+            : String(Date.now()),
+        label: 'Professionalism',
+      },
     ]);
     setFrameworkId('');
     setCourseCode('');
@@ -300,16 +313,61 @@ export default function Eval360FormsPage() {
     );
   }
 
+  // Tạo rubric mới (nếu builder mode)
+  async function createRubricViaAPI(payload: {
+    title: string;
+    threshold: number;
+    framework_id: string | null;
+    course_code: string | null;
+    definition: RubricDef;
+  }): Promise<string> {
+    // Ưu tiên endpoint /api/rubrics/create, fallback /api/rubrics
+    const tryUrls = ['/api/rubrics/create', '/api/rubrics'];
+    let lastErr: any = null;
+    for (const url of tryUrls) {
+      try {
+        const d = await fetchJson(url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const newId =
+          d?.item?.id || d?.rubric?.id || d?.id || d?.data?.id || d?.created?.id || null;
+        if (!newId) throw new Error('API chưa trả về id rubric');
+        return String(newId);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr ?? new Error('Không tạo được rubric');
+  }
+
   async function save() {
     try {
       if (!title.trim()) return setErr('Thiếu tiêu đề biểu mẫu.');
+      let finalRubricId = rubricId;
+
       if (useExistingRubric) {
-        if (!rubricId) return setErr('Chưa chọn rubric.');
+        if (!finalRubricId) return setErr('Chưa chọn rubric.');
       } else {
         if (!rbTitle.trim()) return setErr('Thiếu tiêu đề rubric.');
         if (!rbCols.length || !rbRows.length) return setErr('Rubric phải có ít nhất 1 cột & 1 tiêu chí.');
-        // Nếu muốn ràng buộc rubric với học phần:
-        if (!frameworkId || !courseCode) return setErr('Vui lòng chọn Khung CTĐT và Học phần để lưu rubric.');
+        if (!frameworkId || !courseCode)
+          return setErr('Vui lòng chọn Khung CTĐT và Học phần để lưu rubric.');
+        // tạo rubric mới
+        finalRubricId = await createRubricViaAPI({
+          title: rbTitle.trim(),
+          threshold: rbThreshold,
+          framework_id: frameworkId || null,
+          course_code: courseCode || null,
+          definition: { columns: rbCols, rows: rbRows },
+        });
+        // refresh dropdown rubrics
+        try {
+          const d = await fetchJson('/api/rubrics/list', { credentials: 'include' });
+          setRubrics((d.items || []).map((x: any) => ({ id: x.id, title: x.title as string })));
+        } catch {}
       }
 
       setSaving(true);
@@ -320,24 +378,17 @@ export default function Eval360FormsPage() {
         title: title.trim(),
         group_code: group,
         status,
+        rubric_id: finalRubricId,
+        // NOTE: form có thể (hoặc không) ràng buộc khung/học phần — giữ nếu bạn muốn:
+        framework_id: frameworkId || null,
+        course_code: courseCode || null,
       };
 
-      if (useExistingRubric) {
-        body.rubric_id = rubricId;
-      } else {
-        const def: RubricDef = { columns: rbCols, rows: rbRows };
-        body.new_rubric = {
-          title: rbTitle.trim(),
-          threshold: rbThreshold,
-          framework_id: frameworkId || null,
-          course_code: courseCode || null,
-          definition: def,
-        };
-      }
-
-      await fetchJson('/api/360/form', {
+      // 🔴 DÙNG endpoint quản trị để lưu
+      await fetchJson('/api/360/form/manage', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       });
 
@@ -353,7 +404,10 @@ export default function Eval360FormsPage() {
   async function remove(id: string) {
     if (!confirm('Xoá biểu mẫu này?')) return;
     try {
-      await fetchJson(`/api/360/form?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await fetchJson(`/api/360/form/manage?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
       if (editingId === id) resetForm();
       await loadList();
     } catch (e: any) {
@@ -377,7 +431,9 @@ export default function Eval360FormsPage() {
     setCampLoading(true);
     setCampErr('');
     try {
-      const d = await fetchJson(`/api/360/campaigns?form_id=${encodeURIComponent(formId)}`);
+      const d = await fetchJson(`/api/360/campaigns?form_id=${encodeURIComponent(formId)}`, {
+        credentials: 'include',
+      });
       setCampaigns(d.items || []);
       const now = new Date();
       const after7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -400,12 +456,16 @@ export default function Eval360FormsPage() {
       await fetchJson('/api/360/campaigns', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           form_id: selectedForm.id,
+          // gửi kèm meta để backend không cần lookup nếu muốn
+          rubric_id: selectedForm.rubric_id,
+          framework_id: selectedForm.framework_id ?? null,
+          course_code: selectedForm.course_code ?? null,
           name: `Đợt đánh giá ${now.toLocaleDateString('vi-VN')} (+${days}d)`,
           start_at: now.toISOString(),
           end_at: until.toISOString(),
-          created_by: selfUserId,
         }),
       });
       await loadCampaigns(selectedForm.id);
@@ -424,12 +484,15 @@ export default function Eval360FormsPage() {
       await fetchJson('/api/360/campaigns', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           form_id: selectedForm.id,
+          rubric_id: selectedForm.rubric_id,
+          framework_id: selectedForm.framework_id ?? null,
+          course_code: selectedForm.course_code ?? null,
           name: campName.trim(),
           start_at: new Date(campStart).toISOString(),
           end_at: new Date(campEnd).toISOString(),
-          created_by: selfUserId,
         }),
       });
       await loadCampaigns(selectedForm.id);
@@ -444,6 +507,7 @@ export default function Eval360FormsPage() {
       await fetchJson(`/api/360/campaigns?id=${id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ action: 'close_now' }),
       });
       if (selectedForm) await loadCampaigns(selectedForm.id);
@@ -776,7 +840,7 @@ export default function Eval360FormsPage() {
         )}
       </div>
 
-      {/* Campaign Manager (luôn hiển thị) */}
+      {/* Campaign Manager */}
       <div className="rounded-xl border bg-white p-4">
         <div className="mb-2 font-semibold">Quản lý Campaigns</div>
 
