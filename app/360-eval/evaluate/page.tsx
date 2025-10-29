@@ -16,14 +16,15 @@ type Rubric = {
 
 type StudentOpt = { user_id: string; label: string };
 
-/* =============== Helpers =============== */
+/* ================= Helpers ================= */
 function slugKey(s: string, prefix: string, i: number) {
-  const base = (s || '').toLowerCase().normalize('NFKD')
+  const base = (s || '')
+    .toLowerCase()
+    .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  const k = base || `${prefix}${i+1}`;
-  return k;
+  return base || `${prefix}${i + 1}`;
 }
 
 function normalizeRubric(raw: any): Rubric | null {
@@ -34,12 +35,12 @@ function normalizeRubric(raw: any): Rubric | null {
 
   const columns: Col[] = colsSrc.map((c: any, i: number) => ({
     key: String(c?.key ?? slugKey(String(c?.label ?? ''), 'c', i)),
-    label: String(c?.label ?? c?.key ?? `Level ${i+1}`),
+    label: String(c?.label ?? c?.key ?? `Level ${i + 1}`),
   }));
 
   const rows: Row[] = rowsSrc.map((r: any, i: number) => ({
     key: String(r?.key ?? r?.id ?? slugKey(String(r?.label ?? ''), 'r', i)),
-    label: String(r?.label ?? r?.key ?? r?.id ?? `Criterion ${i+1}`),
+    label: String(r?.label ?? r?.key ?? r?.id ?? `Criterion ${i + 1}`),
   }));
 
   if (!columns.length || !rows.length) return null;
@@ -51,9 +52,30 @@ function normalizeRubric(raw: any): Rubric | null {
   };
 }
 
-/* =============== Combobox async (giữ nguyên) =============== */
+/** Robust JSON fetch: nổ lỗi nếu server trả HTML/không phải JSON */
+async function fetchJson(url: string, init?: RequestInit) {
+  const res = await fetch(url, init);
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(
+      `Non-JSON response from ${url}: ${res.status} ${text.slice(0, 200)}`
+    );
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message)) || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+/* =============== Combobox async (giữ nguyên logic) =============== */
 function AsyncStudentCombobox({
-  value, onChange, disabled, placeholder = 'Nhập MSSV hoặc tên để tìm…',
+  value,
+  onChange,
+  disabled,
+  placeholder = 'Nhập MSSV hoặc tên để tìm…',
 }: {
   value: string | null;
   onChange: (val: { user_id: string; label: string } | null) => void;
@@ -86,9 +108,7 @@ function AsyncStudentCombobox({
         const url = q.trim()
           ? `/api/360/students?q=${encodeURIComponent(q.trim())}`
           : `/api/360/students`;
-        const r = await fetch(url, { credentials: 'include' });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách');
+        const d = await fetchJson(url, { credentials: 'include' });
         const items: StudentOpt[] = (d.items || []).map((x: any) => ({
           user_id: x.user_id,
           label: x.label,
@@ -105,8 +125,11 @@ function AsyncStudentCombobox({
   }, [q, open]);
 
   useEffect(() => {
-    if (!value) { setSelectedLabel(''); return; }
-    const match = opts.find(o => o.user_id === value);
+    if (!value) {
+      setSelectedLabel('');
+      return;
+    }
+    const match = opts.find((o) => o.user_id === value);
     if (match) setSelectedLabel(match.label);
   }, [value, opts]);
 
@@ -115,14 +138,24 @@ function AsyncStudentCombobox({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         className="mt-1 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-60"
       >
         <span className={selectedLabel ? '' : 'text-slate-400'}>
           {selectedLabel || placeholder}
         </span>
-        <svg className="ml-2 h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path d="M6 9l6 6 6-6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        <svg
+          className="ml-2 h-4 w-4 text-slate-500"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+        >
+          <path
+            d="M6 9l6 6 6-6"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </button>
 
@@ -131,32 +164,50 @@ function AsyncStudentCombobox({
           <div className="p-2">
             <input
               value={q}
-              onChange={(e)=>setQ(e.target.value)}
+              onChange={(e) => setQ(e.target.value)}
               autoFocus
               placeholder="Tìm nhanh theo MSSV/họ tên…"
               className="w-full rounded-md border px-2 py-1.5 text-sm"
             />
           </div>
           <div className="max-h-64 overflow-auto border-t">
-            {loading && <div className="px-3 py-2 text-sm text-slate-500">Đang tìm…</div>}
-            {err && !loading && <div className="px-3 py-2 text-sm text-red-600">{err}</div>}
-            {!loading && !err && opts.length === 0 && (
-              <div className="px-3 py-2 text-sm text-slate-500">Không có kết quả</div>
+            {loading && (
+              <div className="px-3 py-2 text-sm text-slate-500">Đang tìm…</div>
             )}
-            {!loading && !err && opts.map(o => (
-              <button
-                key={o.user_id}
-                onClick={() => { onChange(o); setSelectedLabel(o.label); setOpen(false); }}
-                className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${value===o.user_id?'bg-slate-100':''}`}
-              >
-                {o.label}
-              </button>
-            ))}
+            {err && !loading && (
+              <div className="px-3 py-2 text-sm text-red-600">{err}</div>
+            )}
+            {!loading && !err && opts.length === 0 && (
+              <div className="px-3 py-2 text-sm text-slate-500">
+                Không có kết quả
+              </div>
+            )}
+            {!loading &&
+              !err &&
+              opts.map((o) => (
+                <button
+                  key={o.user_id}
+                  onClick={() => {
+                    onChange(o);
+                    setSelectedLabel(o.label);
+                    setOpen(false);
+                  }}
+                  className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${
+                    value === o.user_id ? 'bg-slate-100' : ''
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
           </div>
           {value && (
             <div className="border-t p-2">
               <button
-                onClick={() => { onChange(null); setSelectedLabel(''); setQ(''); }}
+                onClick={() => {
+                  onChange(null);
+                  setSelectedLabel('');
+                  setQ('');
+                }}
                 className="text-xs text-red-600 hover:underline"
               >
                 Xóa lựa chọn
@@ -173,7 +224,7 @@ function AsyncStudentCombobox({
 export default function Eval360DoPage() {
   const { profile } = useAuth();
   const selfUserId = (profile as any)?.user_id ?? null;
-  const selfName   = profile?.name ?? (profile as any)?.email ?? 'Tôi';
+  const selfName = profile?.name ?? (profile as any)?.email ?? 'Tôi';
 
   const [group, setGroup] = useState<GroupCode>('peer');
   const [evaluatee, setEvaluatee] = useState<{ user_id: string; label: string } | null>(null);
@@ -195,14 +246,22 @@ export default function Eval360DoPage() {
     }
   }, [group, selfUserId, selfName]);
 
+  // Lấy danh sách form: **/api/360/form** (không có 's')
   useEffect(() => {
     (async () => {
       try {
         setErr('');
-        const r = await fetch(`/api/360/forms?group_code=${group}&status=active`, { credentials: 'include' });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách biểu mẫu');
-        setForms((d.items || []).map((x: any) => ({ id: x.id, title: x.title, rubric_id: x.rubric_id })));
+        const url = `/api/360/form?group_code=${encodeURIComponent(
+          group
+        )}&status=active`;
+        const d = await fetchJson(url, { credentials: 'include' });
+        setForms(
+          (d.items || []).map((x: any) => ({
+            id: x.id,
+            title: x.title,
+            rubric_id: x.rubric_id,
+          }))
+        );
       } catch (e: any) {
         setForms([]);
         setErr(e?.message || 'Lỗi tải biểu mẫu');
@@ -217,9 +276,9 @@ export default function Eval360DoPage() {
   async function loadRubricDef(id: string) {
     setErr('');
     try {
-      const r = await fetch(`/api/rubrics/get?id=${encodeURIComponent(id)}`, { credentials: 'include' });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'Không lấy được rubric');
+      const d = await fetchJson(`/api/rubrics/get?id=${encodeURIComponent(id)}`, {
+        credentials: 'include',
+      });
       const norm = normalizeRubric(d.item || d.rubric || d.data || d);
       if (!norm) throw new Error('Rubric thiếu hàng/cột');
       setRubric(norm);
@@ -237,7 +296,6 @@ export default function Eval360DoPage() {
 
   const canSubmit = useMemo(() => {
     if (!evaluatee?.user_id || !rubric) return false;
-    // yêu cầu chọn đủ 1 mức cho mỗi dòng
     return rubric.definition.rows.every((row) => !!answers[row.key]);
   }, [evaluatee, rubric, answers]);
 
@@ -247,18 +305,16 @@ export default function Eval360DoPage() {
       setLoading(true);
       setErr('');
 
-      const st = await fetch('/api/360/start', {
+      const st = await fetchJson('/api/360/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           evaluatee_user_id: evaluatee.user_id,
           rubric_id: rubric.id,
-          group_code: group
-        })
+          group_code: group,
+        }),
       });
-      const sd = await st.json();
-      if (!st.ok) throw new Error(sd?.error || 'Không tạo được request');
 
       const items = rubric.definition.rows.map((row) => ({
         item_key: row.key,
@@ -267,19 +323,17 @@ export default function Eval360DoPage() {
         comment: null,
       }));
 
-      const sb = await fetch('/api/360/submit', {
+      await fetchJson('/api/360/submit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          request_id: sd.request_id,
+          request_id: st.request_id,
           rubric_id: rubric.id,
           overall_comment: comment || null,
-          items
-        })
+          items,
+        }),
       });
-      const sbd = await sb.json();
-      if (!sb.ok) throw new Error(sbd?.error || 'Nộp thất bại');
 
       alert('Đã nộp đánh giá 360° thành công!');
       setAnswers({});
@@ -301,7 +355,7 @@ export default function Eval360DoPage() {
             <label className="text-xs font-semibold">Bạn là</label>
             <select
               value={group}
-              onChange={(e)=>setGroup(e.target.value as GroupCode)}
+              onChange={(e) => setGroup(e.target.value as GroupCode)}
               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
             >
               <option value="faculty">Giảng viên</option>
@@ -316,9 +370,13 @@ export default function Eval360DoPage() {
             <label className="text-xs font-semibold">Chọn sinh viên</label>
             <AsyncStudentCombobox
               value={evaluatee?.user_id ?? null}
-              onChange={(v)=>setEvaluatee(v)}
+              onChange={(v) => setEvaluatee(v)}
               disabled={group === 'self'}
-              placeholder={group === 'self' ? 'Tự đánh giá: hệ thống tự chọn bạn' : 'Nhập MSSV hoặc tên để tìm…'}
+              placeholder={
+                group === 'self'
+                  ? 'Tự đánh giá: hệ thống tự chọn bạn'
+                  : 'Nhập MSSV hoặc tên để tìm…'
+              }
             />
           </div>
         </div>
@@ -329,12 +387,14 @@ export default function Eval360DoPage() {
         <label className="text-xs font-semibold">Chọn biểu mẫu</label>
         <select
           value={rubricId}
-          onChange={(e)=>setRubricId(e.target.value)}
+          onChange={(e) => setRubricId(e.target.value)}
           className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
         >
           <option value="">— Chọn —</option>
-          {forms.map(f => (
-            <option key={f.id} value={f.rubric_id}>{f.title}</option>
+          {forms.map((f) => (
+            <option key={f.id} value={f.rubric_id}>
+              {f.title}
+            </option>
           ))}
         </select>
         {err && <div className="mt-2 text-sm text-red-600">{err}</div>}
@@ -349,22 +409,26 @@ export default function Eval360DoPage() {
               <thead>
                 <tr>
                   <th className="border px-3 py-2 text-left w-1/3">Tiêu chí</th>
-                  {rubric.definition.columns.map(col => (
-                    <th key={col.key} className="border px-3 py-2 text-center">{col.label}</th>
+                  {rubric.definition.columns.map((col) => (
+                    <th key={col.key} className="border px-3 py-2 text-center">
+                      {col.label}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rubric.definition.rows.map(row => (
+                {rubric.definition.rows.map((row) => (
                   <tr key={row.key}>
                     <td className="border px-3 py-2">{row.label}</td>
-                    {rubric.definition.columns.map(col => (
+                    {rubric.definition.columns.map((col) => (
                       <td key={col.key} className="border px-3 py-2 text-center">
                         <input
                           type="radio"
                           name={`row-${row.key}`}
-                          checked={answers[row.key]===col.key}
-                          onChange={()=>setAnswers(a=>({ ...a, [row.key]: col.key }))}
+                          checked={answers[row.key] === col.key}
+                          onChange={() =>
+                            setAnswers((a) => ({ ...a, [row.key]: col.key }))
+                          }
                         />
                       </td>
                     ))}
@@ -378,7 +442,7 @@ export default function Eval360DoPage() {
             <label className="text-xs font-semibold">Nhận xét tổng quát</label>
             <textarea
               value={comment}
-              onChange={(e)=>setComment(e.target.value)}
+              onChange={(e) => setComment(e.target.value)}
               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
               rows={3}
               placeholder="Những điểm mạnh & cần cải thiện…"
