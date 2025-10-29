@@ -5,19 +5,20 @@ import { useRouter } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
 
 /** ===== Types ===== */
-type BaseProfile = {
+export type BaseProfile = {
   user_id: string;
   email: string | null;
   name: string;
 
-  /** Vai trò hiển thị trong app */
+  /** Vai trò hiển thị trong app (quy ước UI) */
   role: 'admin' | 'qa' | 'staff' | 'student' | 'other';
 
-  /** Vai trò lưu trong bảng profiles (nếu có) */
-  app_role?: string | null;
+  /** Danh sách role code từ bảng roles (vd: ['admin','qa','viewer']) */
+  roles?: string[];
 
-  /** Cờ admin theo env or profiles.role */
+  /** Cờ phân quyền nhanh cho UI */
   is_admin?: boolean;
+  is_qa?: boolean;
 
   /** Thông tin bộ môn (nếu là staff) */
   dept_id?: string | null;
@@ -67,92 +68,102 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [loading, setLoading] = useState(true);
 
   async function loadProfile(uid: string, u?: any) {
-    /** 1) Thử lấy staff (join department theo alias FK); fallback departments[] nếu lib trả mảng */
-    const staffQ = supabase
-      .from('staff')
-      .select(
+    try {
+      // 1) Staff (join department)
+      const { data: stf } = await supabase
+        .from('staff')
+        .select(
+          `
+          user_id,
+          email,
+          full_name,
+          department_id,
+          department:departments!staff_department_id_fkey ( id, name )
         `
-        user_id,
-        full_name,
-        department_id,
-        department:departments!staff_department_id_fkey ( id, name )
-      `
-      )
-      .eq('user_id', uid)
-      .maybeSingle();
+        )
+        .eq('user_id', uid)
+        .maybeSingle();
 
-    /** 2) Lấy student */
-    const studentQ = supabase
-      .from('students')
-      .select('user_id, full_name, mssv')
-      .eq('user_id', uid)
-      .maybeSingle();
+      // 2) Student
+      const { data: std } = await supabase
+        .from('students')
+        .select('user_id, full_name, mssv')
+        .eq('user_id', uid)
+        .maybeSingle();
 
-    /** 3) (Tuỳ chọn) Lấy profiles.role nếu bạn có bảng này */
-    const profilesQ = supabase
-      .from('profiles')
-      .select('id, email, name, role')
-      .eq('id', uid)
-      .maybeSingle();
+      // 3) Roles từ user_roles → roles (code)
+      const { data: ur } = await supabase
+        .from('user_roles')
+        .select('role:roles!user_roles_role_id_fkey(code)')
+        .eq('staff_user_id', uid);
 
-    // chạy song song; nếu bảng profiles không tồn tại, coi như bỏ qua
-    const [{ data: stf, error: stfErr }, { data: std }, { data: prof, error: profErr }] =
-      await Promise.allSettled([staffQ, studentQ, profilesQ]).then((arr) => {
-        // map PromiseSettledResult -> tuple với shape {data, error}
-        const norm = (r: any) =>
-          r.status === 'fulfilled' ? { data: r.value.data, error: r.value.error } : { data: null, error: r.reason };
-        return [norm(arr[0]), norm(arr[1]), norm(arr[2])] as const;
+      const roles =
+        (ur || [])
+          .map((r: any) => r?.role?.code)
+          .filter(Boolean) as string[];
+
+      // Email & tên hiển thị
+      const email: string | null = u?.email ?? stf?.email ?? null;
+
+      // Cờ theo roles + env
+      const isAdminByRole = roles.includes('admin');
+      const isQAByRole = roles.includes('qa');
+      const isAdminByEmail = email ? ADMIN_EMAILS.includes(email.toLowerCase()) : false;
+      const isAdmin = isAdminByRole || isAdminByEmail;
+      const isQA = isQAByRole;
+
+      // Tên hiển thị: ưu tiên staff → student → user_metadata → email
+      const displayName =
+        stf?.full_name ??
+        std?.full_name ??
+        u?.user_metadata?.name ??
+        email ??
+        'Người dùng';
+
+      // Vai trò UI tổng hợp
+      let finalRole: BaseProfile['role'] = 'other';
+      if (isAdmin) finalRole = 'admin';
+      else if (isQA) finalRole = 'qa';
+      else if (stf) finalRole = 'staff';
+      else if (std) finalRole = 'student';
+
+      // Dept info nếu là staff
+      let dept_id: string | null | undefined = undefined;
+      let dept_name: string | null | undefined = undefined;
+      if (stf) {
+        const deptObj = pickDept(stf.department ?? null);
+        dept_id = stf.department_id ?? deptObj?.id ?? null;
+        dept_name = deptObj?.name ?? null;
+      }
+
+      // MSSV nếu là student
+      const mssv: string | null | undefined = std ? std.mssv ?? null : undefined;
+
+      // Set profile chuẩn
+      setProfile({
+        user_id: uid,
+        email,
+        name: displayName,
+        role: finalRole,
+        roles,
+        is_admin: isAdmin,
+        is_qa: isQA,
+        dept_id,
+        dept_name,
+        mssv,
       });
-
-    // Email & tên hiển thị
-    const email = u?.email ?? (prof as any)?.email ?? null;
-    const appRole = (prof as any)?.role ?? null;
-
-    // Cờ admin theo env hoặc theo profiles.role
-    const isAdminEmail = email ? ADMIN_EMAILS.includes(email.toLowerCase()) : false;
-    const isAdminRole = appRole === 'admin';
-    const isAdmin = isAdminEmail || isAdminRole;
-
-    // Ưu tiên tên hiển thị: staff.full_name → student.full_name → profiles.name → user_metadata.name → email
-    const displayName =
-      (stf as any)?.full_name ||
-      (std as any)?.full_name ||
-      (prof as any)?.name ||
-      u?.user_metadata?.name ||
-      email ||
-      'Người dùng';
-
-    // ===== Ưu tiên quyết định role theo admin/qa trước, rồi staff, student, other
-    let finalRole: BaseProfile['role'] = 'other';
-    if (isAdmin) finalRole = 'admin';
-    else if (appRole === 'qa') finalRole = 'qa';
-    else if (stf) finalRole = 'staff';
-    else if (std) finalRole = 'student';
-
-    // Nếu là staff: chuẩn hoá dept
-    let dept_id: string | null | undefined = undefined;
-    let dept_name: string | null | undefined = undefined;
-    if (stf) {
-      const deptObj = pickDept((stf as any)?.department ?? (stf as any)?.departments ?? null);
-      dept_id = (stf as any)?.department_id ?? deptObj?.id ?? null;
-      dept_name = deptObj?.name ?? null;
+    } catch (e) {
+      // Nếu lỗi, vẫn set profile tối thiểu để tránh kẹt UI
+      setProfile({
+        user_id: uid,
+        email: u?.email ?? null,
+        name: u?.user_metadata?.name ?? u?.email ?? 'Người dùng',
+        role: 'other',
+        roles: [],
+        is_admin: false,
+        is_qa: false,
+      });
     }
-
-    // Nếu là student: lấy MSSV
-    const mssv: string | null | undefined = std ? (std as any)?.mssv ?? null : undefined;
-
-    // Set profile chuẩn
-    setProfile({
-      user_id: uid,
-      email,
-      name: displayName,
-      role: finalRole,
-      app_role: appRole,
-      is_admin: isAdmin,
-      dept_id,
-      dept_name,
-      mssv,
-    });
   }
 
   useEffect(() => {
@@ -189,7 +200,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     await supabase.auth.signOut();
     setProfile(null);
     setUser(null);
-    router.push('/'); // hoặc '/login' tuỳ flow của bạn
+    router.push('/'); // hoặc '/login'
   };
 
   const value = useMemo(() => ({ user, profile, loading, signOut }), [user, profile, loading]);
