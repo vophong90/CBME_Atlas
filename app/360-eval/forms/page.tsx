@@ -45,6 +45,32 @@ const DEFAULT_COLS: RubricColumn[] = [
   { key: 'good',label: 'Good' },
 ];
 
+/** Chuẩn hoá mảng items trả về từ API courses */
+function normalizeCourses(d: any): CourseOpt[] {
+  const arr =
+    d?.items ??
+    d?.data ??
+    d?.rows ??
+    d?.courses ??
+    [];
+  const out = (Array.isArray(arr) ? arr : []).map((x: any) => {
+    const code =
+      x?.course_code ??
+      x?.code ??
+      x?.courseCode ??
+      x?.id ??
+      '';
+    const name =
+      x?.course_name ??
+      x?.name ??
+      x?.title ??
+      x?.label ??
+      null;
+    return code ? { course_code: code, course_name: name } : null;
+  }).filter(Boolean) as CourseOpt[];
+  return out;
+}
+
 export default function Eval360FormsPage() {
   const router = useRouter();
   const { profile, loading } = useAuth();
@@ -72,10 +98,10 @@ export default function Eval360FormsPage() {
   const [rbThreshold, setRbThreshold] = useState<number>(70);
   const [rbCols, setRbCols] = useState<RubricColumn[]>(DEFAULT_COLS);
   const [rbRows, setRbRows] = useState<RubricRow[]>([
-    { id: crypto.randomUUID(), label: 'Professionalism' },
+    { id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), label: 'Professionalism' },
   ]);
 
-  // framework/course (để lưu rubric mới nếu schema rubrics yêu cầu)
+  // framework/course
   const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
   const [courses, setCourses]       = useState<CourseOpt[]>([]);
   const [frameworkId, setFrameworkId] = useState<string>('');
@@ -107,7 +133,6 @@ export default function Eval360FormsPage() {
       try {
         const r = await fetch('/api/frameworks');
         const d = await r.json();
-        // Backend trả { items: [{id, label}] } hoặc { items: [{id, doi_tuong, ...}] }
         const items = (d.items || []).map((x: any) => ({
           id: x.id,
           label: x.label ?? `${x.doi_tuong} • ${x.chuyen_nganh} • ${x.nien_khoa}`,
@@ -117,15 +142,41 @@ export default function Eval360FormsPage() {
     })();
   }, []);
 
-  // Load courses theo framework (API của bạn)
+  // Load courses theo framework (robust)
   useEffect(() => {
     (async () => {
-      if (!frameworkId) { setCourses([]); setCourseCode(''); return; }
-      try {
-        const r = await fetch(`/api/academic-affairs/courses/list?framework_id=${encodeURIComponent(frameworkId)}`);
-        const d = await r.json();
-        setCourses((d.items || []) as CourseOpt[]);
-      } catch { setCourses([]); }
+      setCourses([]);
+      setCourseCode('');
+
+      // Nếu chưa chọn khung → vẫn thử lấy toàn bộ học phần (backend có thể hỗ trợ)
+      const candidateUrls = frameworkId
+        ? [
+            `/api/academic-affairs/courses/list?framework_id=${encodeURIComponent(frameworkId)}`,
+            `/api/academic-affairs/courses/list?frameworkId=${encodeURIComponent(frameworkId)}`,
+            `/api/academic-affairs/courses/list?id=${encodeURIComponent(frameworkId)}`,
+            `/api/academic-affairs/courses/list`, // fallback
+          ]
+        : [
+            `/api/academic-affairs/courses/list`,
+          ];
+
+      for (const url of candidateUrls) {
+        try {
+          const r = await fetch(url);
+          if (!r.ok) continue;
+          const d = await r.json().catch(() => ({}));
+          const norm = normalizeCourses(d);
+          if (norm.length) {
+            setCourses(norm);
+            return;
+          }
+          // Nếu không có rows nhưng call thành công → vẫn set rỗng và thử URL tiếp
+          setCourses([]);
+        } catch (e) {
+          // thử URL tiếp theo
+          continue;
+        }
+      }
     })();
   }, [frameworkId]);
 
@@ -136,7 +187,6 @@ export default function Eval360FormsPage() {
       const params = new URLSearchParams();
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (groupFilter  !== 'all') params.set('group_code', groupFilter);
-      // === đổi forms -> form (số ít)
       const url = `/api/360/form${params.toString() ? `?${params.toString()}` : ''}`;
       const r = await fetch(url);
       const d = await r.json();
@@ -158,7 +208,7 @@ export default function Eval360FormsPage() {
     setRubricId('');
     setRbTitle(''); setRbThreshold(70);
     setRbCols(DEFAULT_COLS);
-    setRbRows([{ id: crypto.randomUUID(), label: 'Professionalism' }]);
+    setRbRows([{ id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), label: 'Professionalism' }]);
     setFrameworkId(''); setCourseCode('');
     setErr('');
   }
@@ -168,7 +218,6 @@ export default function Eval360FormsPage() {
     setTitle(it.title);
     setGroup(it.group_code);
     setStatus(it.status);
-    // khi sửa form cũ, mặc định dùng rubric hiện có
     setUseExistingRubric(true);
     setRubricId(it.rubric_id);
     setFrameworkId(it.framework_id || '');
@@ -186,11 +235,12 @@ export default function Eval360FormsPage() {
     const next = rbCols.slice(); next.splice(idx,1); setRbCols(next);
   }
   function addRow() {
-    setRbRows([...rbRows, { id: crypto.randomUUID(), label: `Criterion ${rbRows.length+1}` }]);
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    setRbRows([...rbRows, { id, label: `Criterion ${rbRows.length+1}` }]);
   }
   function delRow(idx: number) {
     const next = rbRows.slice(); next.splice(idx,1);
-    setRbRows(next.length ? next : [{ id: crypto.randomUUID(), label: 'Criterion' }]);
+    setRbRows(next.length ? next : [{ id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), label: 'Criterion' }]);
   }
 
   async function save() {
@@ -199,10 +249,10 @@ export default function Eval360FormsPage() {
       if (useExistingRubric) {
         if (!rubricId) return setErr('Chưa chọn rubric.');
       } else {
-        // tạo rubric mới → (nếu schema rubrics yêu cầu framework/course) thì bật 2 dòng dưới:
         if (!rbTitle.trim()) return setErr('Thiếu tiêu đề rubric.');
-        if (!frameworkId || !courseCode) return setErr('Vui lòng chọn Khung CTĐT và Học phần để lưu rubric.');
         if (!rbCols.length || !rbRows.length) return setErr('Rubric phải có ít nhất 1 cột & 1 tiêu chí.');
+        // Nếu schema rubrics yêu cầu framework/course, bật hai dòng sau:
+        if (!frameworkId || !courseCode) return setErr('Vui lòng chọn Khung CTĐT và Học phần để lưu rubric.');
       }
 
       setSaving(true); setErr('');
@@ -221,13 +271,12 @@ export default function Eval360FormsPage() {
         body.new_rubric = {
           title: rbTitle.trim(),
           threshold: rbThreshold,
-          framework_id: frameworkId,
-          course_code: courseCode,
+          framework_id: frameworkId || null,
+          course_code: courseCode || null,
           definition: def,
         };
       }
 
-      // === đổi forms -> form (số ít)
       const r = await fetch('/api/360/form', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -248,7 +297,6 @@ export default function Eval360FormsPage() {
   async function remove(id: string) {
     if (!confirm('Xoá biểu mẫu này?')) return;
     try {
-      // === đổi forms -> form (số ít)
       const r = await fetch(`/api/360/form?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'Lỗi xoá biểu mẫu');
@@ -351,7 +399,7 @@ export default function Eval360FormsPage() {
                   <div className="text-xs text-slate-500 flex items-center">Ngưỡng tổng thể để coi là đạt</div>
                 </div>
 
-                {/* Framework & Course (bắt buộc nếu schema rubrics cần) */}
+                {/* Framework & Course */}
                 <div className="grid gap-3 md:grid-cols-2">
                   <select
                     value={frameworkId}
@@ -367,9 +415,8 @@ export default function Eval360FormsPage() {
                     onChange={(e)=>setCourseCode(e.target.value)}
                     className="rounded-lg border px-3 py-2 text-sm"
                     title="Học phần"
-                    disabled={!frameworkId}
                   >
-                    <option value="">{frameworkId ? '— Chọn học phần —' : 'Chọn khung trước'}</option>
+                    <option value="">{frameworkId ? '— Chọn học phần —' : '— Tất cả học phần (nếu API hỗ trợ) —'}</option>
                     {courses.map(c => (
                       <option key={c.course_code} value={c.course_code}>
                         {c.course_code} — {c.course_name || ''}
