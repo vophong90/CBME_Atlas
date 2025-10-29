@@ -55,6 +55,7 @@ const NAV = [
   { key: 'targeting', label: 'Targeting', href: '/quality-assurance/targeting', Icon: UsersIcon },
   { key: 'progress',  label: 'Progress',  href: '/quality-assurance/progress',  Icon: ActivityIcon },
   { key: 'results',   label: 'Results',   href: '/quality-assurance/results',   Icon: BarChartIcon },
+  { key: 'heatmap',   label: 'Heatmap',   href: '/quality-assurance/heatmap',   Icon: BarChartIcon },
 ];
 
 export default function QALayout({ children }: { children: React.ReactNode }) {
