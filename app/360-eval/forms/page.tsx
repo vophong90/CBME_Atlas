@@ -136,6 +136,7 @@ export default function Eval360FormsPage() {
   const [err, setErr] = useState('');
 
   // ===== Campaign Manager state =====
+  const [managerFormId, setManagerFormId] = useState<string>(''); // NEW: chọn form từ dropdown
   const [selectedForm, setSelectedForm] = useState<FormRow | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campLoading, setCampLoading] = useState(false);
@@ -334,7 +335,7 @@ export default function Eval360FormsPage() {
         };
       }
 
-      const d = await fetchJson('/api/360/form', {
+      await fetchJson('/api/360/form', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -361,9 +362,15 @@ export default function Eval360FormsPage() {
   }
 
   /** ===== Campaign Manager: actions ===== */
-  function openCampaignManager(it: FormRow) {
-    setSelectedForm(it);
-    loadCampaigns(it.id);
+  function selectFormForCampaign(fid: string) {
+    setManagerFormId(fid);
+    const found = items.find((x) => x.id === fid) || null;
+    setSelectedForm(found);
+    if (found) loadCampaigns(found.id);
+    else {
+      setCampaigns([]);
+      setCampErr('');
+    }
   }
 
   async function loadCampaigns(formId: string) {
@@ -386,7 +393,7 @@ export default function Eval360FormsPage() {
   }
 
   async function createCampaignQuick(days = 7) {
-    if (!selectedForm) return;
+    if (!selectedForm) return alert('Chọn biểu mẫu trước.');
     try {
       const now = new Date();
       const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
@@ -408,7 +415,7 @@ export default function Eval360FormsPage() {
   }
 
   async function createCampaignManual() {
-    if (!selectedForm) return;
+    if (!selectedForm) return alert('Chọn biểu mẫu trước.');
     try {
       if (!campName.trim() || !campStart || !campEnd) {
         alert('Điền đủ Tên / Thời gian');
@@ -685,132 +692,6 @@ export default function Eval360FormsPage() {
         </div>
       </div>
 
-      {/* Campaign Manager Panel */}
-      {selectedForm && (
-        <div className="rounded-xl border bg-white p-4">
-          <div className="mb-2 font-semibold">
-            Campaigns — <span className="text-brand-700">{selectedForm.title}</span>
-          </div>
-
-          {campErr && (
-            <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{campErr}</div>
-          )}
-
-          <div className="mb-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => createCampaignQuick(1)}
-              className="rounded border px-2 py-1 text-sm hover:bg-slate-50"
-            >
-              Mở ngay 24h
-            </button>
-            <button
-              onClick={() => createCampaignQuick(7)}
-              className="rounded border px-2 py-1 text-sm hover:bg-slate-50"
-            >
-              Mở ngay 7 ngày
-            </button>
-            <button
-              onClick={() => createCampaignQuick(30)}
-              className="rounded border px-2 py-1 text-sm hover:bg-slate-50"
-            >
-              Mở ngay 30 ngày
-            </button>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <input
-              value={campName}
-              onChange={(e) => setCampName(e.target.value)}
-              placeholder="Tên campaign"
-              className="rounded-lg border px-3 py-2 text-sm"
-            />
-            <input
-              type="datetime-local"
-              value={campStart}
-              onChange={(e) => setCampStart(e.target.value)}
-              className="rounded-lg border px-3 py-2 text-sm"
-              title="Bắt đầu"
-            />
-            <input
-              type="datetime-local"
-              value={campEnd}
-              onChange={(e) => setCampEnd(e.target.value)}
-              className="rounded-lg border px-3 py-2 text-sm"
-              title="Kết thúc"
-            />
-            <div className="md:col-span-3">
-              <button onClick={createCampaignManual} className="rounded-lg bg-brand-600 px-4 py-2 text-white">
-                Tạo campaign
-              </button>
-              <button onClick={() => setSelectedForm(null)} className="ml-2 rounded-lg border px-4 py-2">
-                Đóng panel
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 overflow-auto">
-            {campLoading ? (
-              <div className="text-sm text-slate-500">Đang tải…</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className="border px-3 py-2 text-left">Tên</th>
-                    <th className="border px-3 py-2 text-left">Bắt đầu</th>
-                    <th className="border px-3 py-2 text-left">Kết thúc</th>
-                    <th className="border px-3 py-2 w-48"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaigns.map((c) => {
-                    const now = Date.now();
-                    const st = new Date(c.start_at).getTime();
-                    const en = new Date(c.end_at).getTime();
-                    const open = st <= now && now < en;
-                    const future = now < st;
-                    return (
-                      <tr key={c.id}>
-                        <td className="border px-3 py-2">{c.name}</td>
-                        <td className="border px-3 py-2">{new Date(c.start_at).toLocaleString('vi-VN')}</td>
-                        <td className="border px-3 py-2">{new Date(c.end_at).toLocaleString('vi-VN')}</td>
-                        <td className="border px-3 py-2 text-right">
-                          <span
-                            className={`mr-2 inline-block rounded px-2 py-0.5 text-xs ${
-                              open
-                                ? 'bg-green-100 text-green-700'
-                                : future
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {open ? 'Đang mở' : future ? 'Sắp tới' : 'Đã đóng'}
-                          </span>
-                          {open && (
-                            <button
-                              onClick={() => closeCampaignNow(c.id)}
-                              className="rounded border px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                            >
-                              Đóng ngay
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {!campaigns.length && (
-                    <tr>
-                      <td className="border px-3 py-4 text-center text-slate-500" colSpan={4}>
-                        Chưa có campaign
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* List + Filters */}
       <div className="rounded-xl border bg-white p-4">
         <div className="mb-3 flex flex-wrap items-end gap-3">
@@ -818,29 +699,30 @@ export default function Eval360FormsPage() {
             <div className="text-sm font-semibold">Danh sách biểu mẫu 360°</div>
             <div className="text-xs text-slate-500">Lọc theo trạng thái & nhóm</div>
           </div>
-          <div className="ml-auto grid grid-cols-2 gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="rounded-lg border px-3 py-2 text-sm"
-            >
-              <option value="all">Tất cả trạng thái</option>
-              <option value="active">Đang hoạt động</option>
-              <option value="inactive">Ngừng</option>
-            </select>
-            <select
-              value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value as any)}
-              className="rounded-lg border px-3 py-2 text-sm"
-            >
-              <option value="all">Tất cả nhóm</option>
-              <option value="faculty">Giảng viên</option>
-              <option value="peer">Sinh viên đánh giá nhau</option>
-              <option value="self">Sinh viên tự đánh giá</option>
-              <option value="supervisor">Người hướng dẫn</option>
-              <option value="patient">Bệnh nhân</option>
-            </select>
-          </div>
+        </div>
+
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="rounded-lg border px-3 py-2 text-sm"
+          >
+            <option value="all">Tất cả trạng thái</option>
+            <option value="active">Đang hoạt động</option>
+            <option value="inactive">Ngừng</option>
+          </select>
+          <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value as any)}
+            className="rounded-lg border px-3 py-2 text-sm"
+          >
+            <option value="all">Tất cả nhóm</option>
+            <option value="faculty">Giảng viên</option>
+            <option value="peer">Sinh viên đánh giá nhau</option>
+            <option value="self">Sinh viên tự đánh giá</option>
+            <option value="supervisor">Người hướng dẫn</option>
+            <option value="patient">Bệnh nhân</option>
+          </select>
         </div>
 
         {loadingList ? (
@@ -853,7 +735,7 @@ export default function Eval360FormsPage() {
                   <th className="border px-3 py-2 text-left">Tiêu đề</th>
                   <th className="border px-3 py-2">Nhóm</th>
                   <th className="border px-3 py-2">Trạng thái</th>
-                  <th className="border px-3 py-2 w-56"></th>
+                  <th className="border px-3 py-2 w-64"></th>
                 </tr>
               </thead>
               <tbody>
@@ -864,7 +746,7 @@ export default function Eval360FormsPage() {
                     <td className="border px-3 py-2 text-center">{it.status}</td>
                     <td className="border px-3 py-2 text-right">
                       <button
-                        onClick={() => openCampaignManager(it)}
+                        onClick={() => selectFormForCampaign(it.id)}
                         className="mr-2 rounded border px-2 py-1 hover:bg-slate-50"
                       >
                         Campaigns
@@ -892,6 +774,145 @@ export default function Eval360FormsPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Campaign Manager (luôn hiển thị) */}
+      <div className="rounded-xl border bg-white p-4">
+        <div className="mb-2 font-semibold">Quản lý Campaigns</div>
+
+        <div className="mb-3 grid gap-2 md:grid-cols-3">
+          <select
+            value={managerFormId}
+            onChange={(e) => selectFormForCampaign(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+          >
+            <option value="">{items.length ? '— Chọn biểu mẫu —' : '— Chưa có biểu mẫu —'}</option>
+            {items.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.title} ({f.group_code})
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => createCampaignQuick(7)}
+            disabled={!selectedForm}
+            className="rounded border px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
+            title="Mở ngay 7 ngày"
+          >
+            + Mở nhanh 7 ngày
+          </button>
+
+          <button
+            onClick={() => createCampaignQuick(30)}
+            disabled={!selectedForm}
+            className="rounded border px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
+            title="Mở ngay 30 ngày"
+          >
+            + Mở nhanh 30 ngày
+          </button>
+        </div>
+
+        {/* Manual create */}
+        <div className="grid gap-3 md:grid-cols-3">
+          <input
+            value={campName}
+            onChange={(e) => setCampName(e.target.value)}
+            placeholder="Tên campaign"
+            className="rounded-lg border px-3 py-2 text-sm"
+          />
+          <input
+            type="datetime-local"
+            value={campStart}
+            onChange={(e) => setCampStart(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            title="Bắt đầu"
+          />
+          <input
+            type="datetime-local"
+            value={campEnd}
+            onChange={(e) => setCampEnd(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            title="Kết thúc"
+          />
+          <div className="md:col-span-3">
+            <button
+              onClick={createCampaignManual}
+              disabled={!selectedForm}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-white disabled:opacity-50"
+            >
+              Tạo campaign
+            </button>
+          </div>
+        </div>
+
+        {campErr && (
+          <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{campErr}</div>
+        )}
+
+        {/* Campaign list */}
+        <div className="mt-4 overflow-auto">
+          {campLoading ? (
+            <div className="text-sm text-slate-500">Đang tải…</div>
+          ) : selectedForm ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="border px-3 py-2 text-left">Tên</th>
+                  <th className="border px-3 py-2 text-left">Bắt đầu</th>
+                  <th className="border px-3 py-2 text-left">Kết thúc</th>
+                  <th className="border px-3 py-2 w-48"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {campaigns.map((c) => {
+                  const now = Date.now();
+                  const st = new Date(c.start_at).getTime();
+                  const en = new Date(c.end_at).getTime();
+                  const open = st <= now && now < en;
+                  const future = now < st;
+                  return (
+                    <tr key={c.id}>
+                      <td className="border px-3 py-2">{c.name}</td>
+                      <td className="border px-3 py-2">{new Date(c.start_at).toLocaleString('vi-VN')}</td>
+                      <td className="border px-3 py-2">{new Date(c.end_at).toLocaleString('vi-VN')}</td>
+                      <td className="border px-3 py-2 text-right">
+                        <span
+                          className={`mr-2 inline-block rounded px-2 py-0.5 text-xs ${
+                            open
+                              ? 'bg-green-100 text-green-700'
+                              : future
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {open ? 'Đang mở' : future ? 'Sắp tới' : 'Đã đóng'}
+                        </span>
+                        {open && (
+                          <button
+                            onClick={() => closeCampaignNow(c.id)}
+                            className="rounded border px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                          >
+                            Đóng ngay
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!campaigns.length && (
+                  <tr>
+                    <td className="border px-3 py-4 text-center text-slate-500" colSpan={4}>
+                      Chưa có campaign
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-sm text-slate-500">Chọn một biểu mẫu để quản lý campaign.</div>
+          )}
+        </div>
       </div>
     </div>
   );
