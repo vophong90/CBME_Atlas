@@ -9,18 +9,25 @@ type AssignmentRow = {
   id: string;
   survey_id: string;
   assigned_to: string;
-  role: 'lecturer' | 'student' | 'support' | null;
-  department: string | null;
-  cohort: string | null;
-  unit: string | null;
-  invited_at: string | null;
-  last_reminded_at: string | null;
-  // Enriched fields từ view qa_participants_view (nếu có)
-  email?: string | null;
-  name?: string | null;
-  // Trạng thái nộp từ survey_responses
+  role: 'lecturer'|'student'|'support'|null;
+  department: string|null;
+  cohort: string|null;
+  unit: string|null;
+  invited_at: string|null;
+  last_reminded_at: string|null;
+
+  // server-enriched
+  email?: string|null;
+  name?: string|null;
   is_submitted?: boolean;
-  submitted_at?: string | null;
+  submitted_at?: string|null;
+
+  // labels (server provided)
+  role_label?: string;          // 'Giảng viên' | 'Sinh viên' | 'Hỗ trợ'
+  department_name?: string|null;
+  cohort_label?: string|null;
+  unit_name?: string|null;
+  org_label?: string;           // Bộ môn (nếu GV) / Khung (nếu SV) / Unit khác
 };
 
 type ApiProgress = {
@@ -65,9 +72,9 @@ export default function ProgressPage() {
     setToast(null);
     try {
       const r = await fetch(`/api/qa/surveys/${surveyId}/progress`, { credentials: 'include' });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || `Lỗi ${r.status}`);
-      setRows((d.assignments ?? []) as AssignmentRow[]);
+      const d = (await r.json()) as ApiProgress | { error?: string };
+      if (!r.ok) throw new Error((d as any)?.error || `Lỗi ${r.status}`);
+      setRows((d as ApiProgress).assignments ?? []);
     } catch (e: any) {
       setToast({ type: 'error', text: e.message ?? 'Không tải được tiến độ' });
       setRows([]);
@@ -99,7 +106,7 @@ export default function ProgressPage() {
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Tiến độ khảo sát</h1>
-        <p className="text-sm text-gray-600">Danh sách người được mời và trạng thái đã nộp.</p>
+        <p className="text-sm text-gray-600">Danh sách người được mời (tiếng Việt hoá) và trạng thái đã nộp.</p>
       </div>
 
       <div className="border rounded-lg p-4 space-y-3 bg-white">
@@ -133,11 +140,6 @@ export default function ProgressPage() {
                     filter === k ? 'bg-black text-white' : 'hover:bg-gray-50'
                   ].join(' ')}
                   disabled={loading}
-                  title={
-                    k === 'all' ? 'Tất cả'
-                    : k === 'submitted' ? 'Đã nộp'
-                    : 'Chưa nộp'
-                  }
                 >
                   {k === 'all' ? 'Tất cả' : k === 'submitted' ? 'Đã nộp' : 'Chưa nộp'}
                 </button>
@@ -171,14 +173,14 @@ export default function ProgressPage() {
           )}
         </div>
 
-        {/* Bảng chi tiết */}
+        {/* Bảng chi tiết (tiếng Việt & tên/bộ môn/khung) */}
         <div className="overflow-auto">
-          <table className="min-w-[960px] w-full border-collapse">
+          <table className="min-w-[980px] w-full border-collapse">
             <thead>
               <tr className="text-left border-b">
                 <th className="py-2 pr-3 w-[280px]">Người được mời</th>
                 <th className="py-2 pr-3 w-28">Vai trò</th>
-                <th className="py-2 pr-3 w-40">Bộ môn / Khung</th>
+                <th className="py-2 pr-3 w-56">Bộ môn / Khung</th>
                 <th className="py-2 pr-3 w-40">Mời lúc</th>
                 <th className="py-2 pr-3 w-40">Nhắc gần nhất</th>
                 <th className="py-2 pr-3 w-28">Trạng thái</th>
@@ -192,15 +194,8 @@ export default function ProgressPage() {
                     <div className="font-medium">{r.name || '(Chưa có tên)'}</div>
                     <div className="text-xs text-gray-600">{r.email || r.assigned_to}</div>
                   </td>
-                  <td className="py-2 pr-3">{r.role ?? '-'}</td>
-                  <td className="py-2 pr-3">
-                    {/* Nếu role là lecturer thì ưu tiên hiện department; nếu student thì ưu tiên cohort */}
-                    {r.role === 'lecturer'
-                      ? (r.department || '-')
-                      : r.role === 'student'
-                      ? (r.cohort || '-')
-                      : (r.unit || r.department || r.cohort || '-')}
-                  </td>
+                  <td className="py-2 pr-3">{r.role_label ?? '-'}</td>
+                  <td className="py-2 pr-3">{r.org_label ?? '-'}</td>
                   <td className="py-2 pr-3">{fmt(r.invited_at)}</td>
                   <td className="py-2 pr-3">{fmt(r.last_reminded_at)}</td>
                   <td className="py-2 pr-3">
@@ -228,7 +223,7 @@ export default function ProgressPage() {
         </div>
 
         <div className="text-xs text-gray-500">
-          * Dữ liệu lấy từ <code>survey_assignments</code> và <code>survey_responses</code>. Tên/Email được làm giàu từ <code>qa_participants_view</code> nếu có.
+          * Hiển thị đã chuẩn hoá: Vai trò bằng tiếng Việt; Bộ môn/Khung/Unit hiển thị tên (nếu bảng <code>departments</code>, <code>curriculum_frameworks</code>, <code>units</code> tồn tại).
         </div>
       </div>
     </div>
@@ -240,7 +235,6 @@ function fmt(s: string | null | undefined) {
   try {
     const d = new Date(s);
     if (Number.isNaN(d.getTime())) return s;
-    // YYYY-MM-DD HH:mm
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   } catch {
