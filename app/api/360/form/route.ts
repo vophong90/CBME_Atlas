@@ -5,132 +5,84 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabaseServer';
 
+/**
+ * Query: ?group_code=self|peer|faculty|supervisor|patient&status=active
+ * Trả về các form (eval360_forms) chỉ khi đang có campaign mở (evaluation_campaigns)
+ * Campaign mở = start_at <= now < end_at
+ * Khớp theo rubric_id; nếu campaign có framework_id/course_code thì phải khớp với form.
+ */
 export async function GET(req: Request) {
-  const sb = createServiceClient();
-  const url = new URL(req.url);
-  const status = url.searchParams.get('status') || undefined;
-  const group  = url.searchParams.get('group_code') || undefined;
+  try {
+    const url = new URL(req.url);
+    const group_code = url.searchParams.get('group_code') || undefined;
+    const status = url.searchParams.get('status') || 'active';
+    const nowIso = new Date().toISOString();
 
-  let q = sb.from('eval360_forms')
-    .select('id,title,group_code,rubric_id,framework_id,course_code,status,created_at,updated_at')
-    .order('created_at', { ascending: false });
+    const supabase = createServiceClient();
 
-  if (status && status !== 'all') q = q.eq('status', status);
-  if (group  && group  !== 'all') q = q.eq('group_code', group);
+    // 1) Lấy các campaign đang mở
+    //   start_at <= now < end_at
+    const { data: openCamps, error: campErr } = await supabase
+      .from('evaluation_campaigns')
+      .select('id, rubric_id, framework_id, course_code, start_at, end_at')
+      .lte('start_at', nowIso)
+      .gt('end_at', nowIso);
 
-  const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ items: data ?? [] });
-}
+    if (campErr) throw campErr;
 
-export async function POST(req: Request) {
-  const sb = createServiceClient();
-  const body = await req.json().catch(() => ({}));
-
-  const {
-    id,
-    title,
-    group_code,
-    status,
-    rubric_id,
-    framework_id: bodyFrameworkId,
-    course_code: bodyCourseCode,
-    new_rubric, // { title, threshold, framework_id, course_code, definition }
-  } = body || {};
-
-  if (!title || !group_code) {
-    return NextResponse.json({ error: 'Thiếu title/group_code' }, { status: 400 });
-  }
-
-  let finalRubricId: string | undefined = rubric_id;
-  let formFrameworkId: string | null = bodyFrameworkId ?? null;
-  let formCourseCode: string | null   = bodyCourseCode ?? null;
-
-  // 1) Nếu FE gửi builder rubric mới → tạo rubric trước
-  if (!finalRubricId && new_rubric) {
-    const { title: rtitle, threshold, framework_id, course_code, definition } = new_rubric || {};
-    if (!rtitle || !definition) {
-      return NextResponse.json({ error: 'Thiếu rubric title/definition' }, { status: 400 });
+    if (!openCamps?.length) {
+      return NextResponse.json({ items: [] });
     }
 
-    const { data: rub, error: rerr } = await sb
-      .from('rubrics')
-      .insert({
-        title: rtitle,
-        threshold: threshold ?? null,
-        framework_id: framework_id ?? null,    // nếu rubrics yêu cầu NOT NULL, FE đã bắt buộc chọn
-        course_code: course_code ?? null,
-        definition
-      })
-      .select('id, framework_id, course_code')
-      .single();
-    if (rerr) return NextResponse.json({ error: rerr.message }, { status: 400 });
+    // Gom theo rubric_id để lọc forms nhanh
+    const rubricSet = new Set<string>(
+      openCamps
+        .map((c) => String(c.rubric_id))
+        .filter((x) => !!x)
+    );
 
-    finalRubricId = rub.id;
-    // nếu form chưa có framework/course → copy từ rubric mới
-    formFrameworkId = formFrameworkId ?? rub.framework_id ?? null;
-    formCourseCode  = formCourseCode  ?? rub.course_code  ?? null;
-  }
-
-  // 2) Nếu dùng rubric có sẵn mà form chưa có framework/course → lấy theo rubric
-  if (!finalRubricId) {
-    return NextResponse.json({ error: 'Thiếu rubric_id' }, { status: 400 });
-  }
-  if (!formFrameworkId || !formCourseCode) {
-    const { data: rub } = await sb
-      .from('rubrics')
-      .select('id, framework_id, course_code')
-      .eq('id', finalRubricId)
-      .single();
-    if (rub) {
-      formFrameworkId = formFrameworkId ?? rub.framework_id ?? null;
-      formCourseCode  = formCourseCode  ?? rub.course_code  ?? null;
+    if (rubricSet.size === 0) {
+      return NextResponse.json({ items: [] });
     }
-  }
 
-  // 3) Ghi vào eval360_forms
-  if (id) {
-    const { data, error } = await sb
+    // 2) Lấy forms theo group_code/status, lọc theo rubric_id ∈ open-campaigns
+    let q = supabase
       .from('eval360_forms')
-      .update({
-        title,
-        group_code,
-        status: status ?? 'active',
-        rubric_id: finalRubricId,
-        framework_id: formFrameworkId, // có thể null theo schema của bạn
-        course_code: formCourseCode,   // có thể null theo schema của bạn
-        updated_at: new Date().toISOString(),
+      .select('id, title, group_code, rubric_id, framework_id, course_code, status')
+      .in('rubric_id', Array.from(rubricSet));
+
+    if (group_code) q = q.eq('group_code', group_code);
+    if (status)     q = q.eq('status', status);
+
+    const { data: forms, error: formErr } = await q.order('created_at', { ascending: false });
+    if (formErr) throw formErr;
+
+    if (!forms?.length) {
+      return NextResponse.json({ items: [] });
+    }
+
+    // 3) Giữ lại form có ÍT NHẤT 1 campaign mở khớp (rubric_id + (fw/code nếu campaign có chỉ định))
+    const items = forms.filter((f) =>
+      openCamps.some((c) => {
+        if (String(c.rubric_id) !== String(f.rubric_id)) return false;
+        if (c.framework_id && String(c.framework_id) !== String(f.framework_id || '')) return false;
+        if (c.course_code && String(c.course_code) !== String(f.course_code || '')) return false;
+        return true;
       })
-      .eq('id', id)
-      .select('*')
-      .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ data });
-  } else {
-    const { data, error } = await sb
-      .from('eval360_forms')
-      .insert({
-        title,
-        group_code,
-        status: status ?? 'active',
-        rubric_id: finalRubricId,
-        framework_id: formFrameworkId,
-        course_code: formCourseCode,
-      })
-      .select('*')
-      .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ data }, { status: 201 });
+    );
+
+    return NextResponse.json({
+      items: items.map((f) => ({
+        id: f.id,
+        title: f.title,
+        rubric_id: f.rubric_id,
+        group_code: f.group_code,
+        framework_id: f.framework_id,
+        course_code: f.course_code,
+        status: f.status,
+      })),
+    });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
-}
-
-export async function DELETE(req: Request) {
-  const sb = createServiceClient();
-  const url = new URL(req.url);
-  const id = url.searchParams.get('id') || '';
-  if (!id) return NextResponse.json({ error: 'Thiếu id' }, { status: 400 });
-
-  const { error } = await sb.from('eval360_forms').delete().eq('id', id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ ok: true });
 }
