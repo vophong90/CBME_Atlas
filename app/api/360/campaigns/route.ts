@@ -5,106 +5,111 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabaseServer';
 
-// Kiểu payload mở (tuỳ cột bạn có trong bảng evaluation_campaigns)
-type UpsertPayload = Record<string, any>;
-
-/**
- * GET /api/360/campaigns?id=...&limit=...&q=...
- * - Nếu có id: trả về 1 campaign
- * - Nếu không: trả danh sách (có thể filter q, limit)
- */
 export async function GET(req: Request) {
-  const db = createServiceClient(); // luôn có, nếu thiếu ENV sẽ throw và vào catch
-
   try {
+    const supabase = createServiceClient();
     const url = new URL(req.url);
-    const id = url.searchParams.get('id');
-    const q = url.searchParams.get('q')?.trim();
-    const limit = Number(url.searchParams.get('limit') ?? '100');
+    const form_id = url.searchParams.get('form_id') || '';
 
-    if (id) {
-      const { data, error } = await db
-        .from('evaluation_campaigns')
-        .select('*')
-        .eq('id', id)
-        .single();
+    if (!form_id) return NextResponse.json({ error: 'Thiếu form_id' }, { status: 400 });
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-      return NextResponse.json({ item: data });
-    }
+    // Lấy form để biết rubric_id, framework_id/course_code
+    const { data: form, error: formErr } = await supabase
+      .from('eval360_forms')
+      .select('id, rubric_id, framework_id, course_code, title')
+      .eq('id', form_id)
+      .maybeSingle();
+    if (formErr) throw formErr;
+    if (!form) return NextResponse.json({ error: 'Form không tồn tại' }, { status: 404 });
 
-    let query = db.from('evaluation_campaigns').select('*').order('created_at', { ascending: false }).limit(limit);
-    if (q) {
-      // tuỳ DB, có thể đổi sang ilike nhiều cột
-      query = query.ilike('name', `%${q}%`);
-    }
-    const { data, error } = await query;
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ items: data ?? [] });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
+    let { data: camps, error: campsErr } = await supabase
+      .from('evaluation_campaigns')
+      .select('id, name, rubric_id, framework_id, course_code, start_at, end_at, created_by')
+      .eq('rubric_id', form.rubric_id)
+      .order('start_at', { ascending: false });
+    if (campsErr) throw campsErr;
+
+    // Chỉ giữ campaign khớp khung/học phần nếu campaign có set
+    camps = (camps || []).filter(c => {
+      if (c.framework_id && String(c.framework_id) !== String(form.framework_id || '')) return false;
+      if (c.course_code && String(c.course_code) !== String(form.course_code || '')) return false;
+      return true;
+    });
+
+    return NextResponse.json({ items: camps || [] });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
 
-/**
- * POST /api/360/campaigns
- * body: { id?: string, ...payload }
- * - Có id  -> UPDATE + return row
- * - Không  -> INSERT + return row
- */
 export async function POST(req: Request) {
-  const db = createServiceClient();
-
   try {
-    const body = (await req.json().catch(() => ({}))) as { id?: string } & UpsertPayload;
-    const { id, ...payload } = body || {};
+    const supabase = createServiceClient();
+    const body = await req.json();
 
-    if (!payload || Object.keys(payload).length === 0) {
-      return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
+    const form_id    = String(body?.form_id || '');
+    const name       = String(body?.name || '');
+    const start_at   = String(body?.start_at || '');
+    const end_at     = String(body?.end_at || '');
+    const created_by = String(body?.created_by || ''); // frontend gửi profile.user_id
+
+    if (!form_id || !name || !start_at || !end_at || !created_by) {
+      return NextResponse.json({ error: 'Thiếu trường bắt buộc' }, { status: 400 });
     }
 
-    if (id) {
-      const { data, error } = await db
-        .from('evaluation_campaigns')
-        .update(payload)
-        .eq('id', id)
-        .select('*')
-        .single();
+    const { data: form, error: formErr } = await supabase
+      .from('eval360_forms')
+      .select('id, rubric_id, framework_id, course_code')
+      .eq('id', form_id)
+      .maybeSingle();
+    if (formErr) throw formErr;
+    if (!form) return NextResponse.json({ error: 'Form không tồn tại' }, { status: 404 });
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json({ item: data });
-    } else {
-      const { data, error } = await db
-        .from('evaluation_campaigns')
-        .insert(payload)
-        .select('*')
-        .single();
+    const payload = {
+      name,
+      rubric_id: form.rubric_id,
+      framework_id: form.framework_id,
+      course_code: form.course_code,
+      start_at,
+      end_at,
+      created_by,
+    };
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json({ item: data });
-    }
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
+    const { data: ins, error: insErr } = await supabase
+      .from('evaluation_campaigns')
+      .insert(payload)
+      .select('id')
+      .maybeSingle();
+    if (insErr) throw insErr;
+
+    return NextResponse.json({ id: ins?.id });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
 
-/**
- * DELETE /api/360/campaigns?id=...
- */
-export async function DELETE(req: Request) {
-  const db = createServiceClient();
-
+export async function PATCH(req: Request) {
   try {
+    const supabase = createServiceClient();
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    if (!id) return NextResponse.json({ error: 'Thiếu id' }, { status: 400 });
 
-    const { error } = await db.from('evaluation_campaigns').delete().eq('id', id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const body = await req.json();
+    const action = String(body?.action || '');
 
-    return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 });
+    if (action === 'close_now') {
+      const nowIso = new Date().toISOString();
+      const { error: upErr } = await supabase
+        .from('evaluation_campaigns')
+        .update({ end_at: nowIso })
+        .eq('id', id);
+      if (upErr) throw upErr;
+      return NextResponse.json({ ok: true });
+    }
+
+    return NextResponse.json({ error: 'Action không hợp lệ' }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }
 }
