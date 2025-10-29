@@ -4,15 +4,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 type RolePick = 'lecturer' | 'student';
+
 type Person = {
   user_id: string;
   name: string | null;
   email: string | null;
   role: RolePick;
-  department_id?: string | null; // từ view
-  framework_id?: string | null;  // từ view
-  unit_id?: string | null;       // từ view
+  department_id?: string | null;
+  framework_id?: string | null;
+  unit_id?: string | null;
 };
 
 type SurveyRow = {
@@ -22,6 +26,9 @@ type SurveyRow = {
   created_at: string;
 };
 
+type Dept = { id: string; name: string | null };
+type FW   = { id: string; doi_tuong: string | null; chuyen_nganh: string | null; nien_khoa: string | null };
+
 const STATUS_LABELS: Record<SurveyRow['status'], string> = {
   draft: 'Nháp',
   active: 'Đang hoạt động',
@@ -29,15 +36,38 @@ const STATUS_LABELS: Record<SurveyRow['status'], string> = {
   archived: 'Lưu trữ',
 };
 
+const ALL = '';
+const NULL_SENTINEL = '__NULL__';
+
+function shortId(id?: string | null) {
+  if (!id) return '';
+  return id.slice(0, 4);
+}
+
+function fwLabel(fw?: Partial<FW> | null, id?: string | null) {
+  if (!fw) return `#${shortId(id)}`;
+  const parts = [fw.doi_tuong, fw.chuyen_nganh, fw.nien_khoa].filter(Boolean);
+  return parts.length ? parts.join(' – ') : `#${shortId(id)}`;
+}
+
 export default function TargetingPage() {
-  const supabase = getSupabase();
   const searchParams = useSearchParams();
   const preSurveyId = searchParams.get('surveyId') || '';
 
   const [audience, setAudience] = useState<RolePick>('lecturer');
+
   const [people, setPeople] = useState<Person[]>([]);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [surveyId, setSurveyId] = useState<string>(preSurveyId);
+
+  const [departments, setDepartments] = useState<Dept[]>([]);
+  const [frameworks, setFrameworks] = useState<FW[]>([]);
+  const [depMap, setDepMap] = useState<Record<string, string>>({});
+  const [fwMap, setFwMap] = useState<Record<string, string>>({});
+
+  const [selectedDept, setSelectedDept] = useState<string>(ALL);       // '', '__NULL__', or dept id
+  const [selectedFW, setSelectedFW]     = useState<string>(ALL);       // '', '__NULL__', or fw id
+
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [selectAll, setSelectAll] = useState(false);
   const [q, setQ] = useState('');
@@ -45,31 +75,39 @@ export default function TargetingPage() {
   const [inviting, setInviting] = useState(false);
   const [toast, setToast] = useState<{ type: 'success'|'error'; text: string } | null>(null);
 
+  // ====== Load Surveys ======
   async function loadSurveys() {
-    const { data, error } = await supabase
-      .from('surveys')
-      .select('id,title,status,created_at')
-      .order('status', { ascending: true })
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    setSurveys((data ?? []) as SurveyRow[]);
-    if (!preSurveyId && data && data.length) {
-      const firstActive = (data as SurveyRow[]).find(s => s.status === 'active');
-      if (firstActive) setSurveyId(firstActive.id);
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('surveys')
+        .select('id,title,status,created_at')
+        .order('status', { ascending: true })
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const rows = (data ?? []) as SurveyRow[];
+      setSurveys(rows);
+      if (!preSurveyId && rows.length) {
+        const firstActive = rows.find(s => s.status === 'active');
+        if (firstActive) setSurveyId(firstActive.id);
+      }
+    } catch (e: any) {
+      setToast({ type: 'error', text: e.message ?? 'Không tải được danh sách Bảng khảo sát' });
     }
   }
 
+  // ====== Load People ======
   async function loadPeople(role: RolePick) {
     setLoading(true);
     setToast(null);
     try {
+      const supabase = getSupabase();
       const { data, error } = await supabase
         .from('qa_participants_view')
         .select('user_id,email,name,role,department_id,framework_id,unit_id')
         .eq('role', role)
         .order('name', { ascending: true });
       if (error) throw error;
-
       const rows = (data ?? []).map((r: any) => ({
         user_id: r.user_id as string,
         name: r.name as string | null,
@@ -79,7 +117,6 @@ export default function TargetingPage() {
         framework_id: r.framework_id,
         unit_id: r.unit_id,
       })) as Person[];
-
       setPeople(rows);
       setSelected({});
       setSelectAll(false);
@@ -90,23 +127,118 @@ export default function TargetingPage() {
     }
   }
 
+  // ====== Load Departments / Frameworks (labels) ======
+  async function loadDepartments() {
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('departments')
+        .select('id,name')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      const rows = (data ?? []) as Dept[];
+      setDepartments(rows);
+      const m: Record<string, string> = {};
+      rows.forEach(d => { m[d.id] = d.name || `Bộ môn #${shortId(d.id)}`; });
+      setDepMap(m);
+    } catch {
+      // Fallback: không có quyền xem departments → để trống, UI sẽ rơi về nhãn rút gọn từ id
+      setDepartments([]);
+      setDepMap({});
+    }
+  }
+
+  async function loadFrameworks() {
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('curriculum_frameworks')
+        .select('id,doi_tuong,chuyen_nganh,nien_khoa')
+        .order('nien_khoa', { ascending: false });
+      if (error) throw error;
+      const rows = (data ?? []) as FW[];
+      setFrameworks(rows);
+      const m: Record<string, string> = {};
+      rows.forEach(f => { m[f.id] = fwLabel(f, f.id); });
+      setFwMap(m);
+    } catch {
+      setFrameworks([]);
+      setFwMap({});
+    }
+  }
+
   useEffect(() => {
-    loadSurveys().catch(e => setToast({ type: 'error', text: String(e?.message || e) }));
+    loadSurveys();
+    loadDepartments();
+    loadFrameworks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   useEffect(() => {
     loadPeople(audience);
+    setSelectedDept(ALL);
+    setSelectedFW(ALL);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audience]);
 
+  // ====== Compute filtered options present in current people list ======
+  const deptIdsInPeople = useMemo(() => {
+    const s = new Set<string | null>();
+    people.forEach(p => s.add(p.department_id ?? null));
+    return s;
+  }, [people]);
+
+  const fwIdsInPeople = useMemo(() => {
+    const s = new Set<string | null>();
+    people.forEach(p => s.add(p.framework_id ?? null));
+    return s;
+  }, [people]);
+
+  // Dropdown options limited to what's present in the current people list (plus All)
+  const deptOptions = useMemo(() => {
+    // build list: ALL, NULL, then ids
+    const ids: (string | null)[] = Array.from(deptIdsInPeople.values());
+    const onlyIds = ids.filter((x): x is string => !!x);
+    const unique = Array.from(new Set(onlyIds));
+    return unique.map(id => ({ id, label: depMap[id] || `Bộ môn #${shortId(id)}` }));
+  }, [deptIdsInPeople, depMap]);
+
+  const fwOptions = useMemo(() => {
+    const ids: (string | null)[] = Array.from(fwIdsInPeople.values());
+    const onlyIds = ids.filter((x): x is string => !!x);
+    const unique = Array.from(new Set(onlyIds));
+    return unique.map(id => {
+      const found = frameworks.find(f => f.id === id);
+      return { id, label: found ? fwLabel(found, id) : `Khung #${shortId(id)}` };
+    });
+  }, [fwIdsInPeople, frameworks]);
+
+  // ====== Filtering logic ======
   const filtered = useMemo(() => {
     const v = q.trim().toLowerCase();
-    if (!v) return people;
-    return people.filter(p =>
-      (p.name || '').toLowerCase().includes(v) ||
-      (p.email || '').toLowerCase().includes(v)
-    );
-  }, [people, q]);
+    return people.filter(p => {
+      // search by name/email
+      if (v) {
+        const okText =
+          (p.name || '').toLowerCase().includes(v) ||
+          (p.email || '').toLowerCase().includes(v);
+        if (!okText) return false;
+      }
+      // department filter
+      if (selectedDept === NULL_SENTINEL) {
+        if (p.department_id !== null && p.department_id !== undefined) return false;
+      } else if (selectedDept !== ALL) {
+        if (p.department_id !== selectedDept) return false;
+      }
+      // framework filter
+      if (selectedFW === NULL_SENTINEL) {
+        if (p.framework_id !== null && p.framework_id !== undefined) return false;
+      } else if (selectedFW !== ALL) {
+        if (p.framework_id !== selectedFW) return false;
+      }
+      return true;
+    });
+  }, [people, q, selectedDept, selectedFW]);
 
   const selectedCount = useMemo(() => Object.values(selected).filter(Boolean).length, [selected]);
 
@@ -120,6 +252,7 @@ export default function TargetingPage() {
       setSelected({});
     }
   }
+
   function toggleOne(id: string, checked: boolean) {
     setSelected(prev => ({ ...prev, [id]: checked }));
   }
@@ -138,13 +271,14 @@ export default function TargetingPage() {
     setInviting(true);
     setToast(null);
     try {
-      // đọc assignment đã có để tránh trùng (theo unique (survey_id, assigned_to))
+      const supabase = getSupabase();
+
+      // Tránh trùng (unique (survey_id, assigned_to))
       const { data: existed, error: e1 } = await supabase
         .from('survey_assignments')
         .select('assigned_to')
         .eq('survey_id', surveyId);
       if (e1) throw e1;
-
       const existing = new Set<string>((existed ?? []).map((r: any) => r.assigned_to as string));
       const toAdd = ids.filter(uid => !existing.has(uid));
       if (toAdd.length === 0) {
@@ -152,20 +286,17 @@ export default function TargetingPage() {
         return;
       }
 
-      // map dữ liệu đúng schema: assigned_to (không phải user_id)
       const nowIso = new Date().toISOString();
       const rows = toAdd.map(uid => {
         const p = people.find(x => x.user_id === uid);
         return {
           survey_id: surveyId,
           assigned_to: uid,
-          role: audience,               // check constraint: lecturer|student|support
-          // 3 cột dưới là text; bạn có thể map tên bộ môn/lớp nếu muốn
-          department: null as any,
+          role: audience,                 // check constraint: lecturer|student|support
+          department: p?.department_id || null, // nếu bạn muốn ghi id làm text
           cohort: null as any,
-          unit: null as any,
+          unit: p?.unit_id || null,
           invited_at: nowIso,
-          // created_by default auth.uid()
         };
       });
 
@@ -181,14 +312,15 @@ export default function TargetingPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
+    <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Mời tham gia khảo sát</h1>
       </div>
 
       {/* Bộ lọc + chọn survey */}
       <div className="border rounded-xl p-4 bg-white space-y-3">
-        <div className="grid md:grid-cols-4 gap-3">
+        <div className="grid md:grid-cols-6 gap-3">
+          {/* Audience */}
           <div className="md:col-span-1">
             <label className="text-sm">Đối tượng</label>
             <select
@@ -201,7 +333,8 @@ export default function TargetingPage() {
             </select>
           </div>
 
-        <div className="md:col-span-2">
+          {/* Survey */}
+          <div className="md:col-span-2">
             <label className="text-sm">Bảng khảo sát</label>
             <select
               className="w-full border rounded px-3 py-2"
@@ -217,6 +350,47 @@ export default function TargetingPage() {
             </select>
           </div>
 
+          {/* Department filter */}
+          <div className="md:col-span-1">
+            <label className="text-sm">Bộ môn</label>
+            <select
+              className="w-full border rounded px-3 py-2"
+              value={selectedDept}
+              onChange={(e) => setSelectedDept(e.target.value)}
+            >
+              <option value={ALL}>— Tất cả —</option>
+              {deptIdsInPeople.has(null) && (
+                <option value={NULL_SENTINEL}>(Chưa gán)</option>
+              )}
+              {deptOptions.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Framework filter */}
+          <div className="md:col-span-1">
+            <label className="text-sm">Khung đào tạo</label>
+            <select
+              className="w-full border rounded px-3 py-2"
+              value={selectedFW}
+              onChange={(e) => setSelectedFW(e.target.value)}
+            >
+              <option value={ALL}>— Tất cả —</option>
+              {fwIdsInPeople.has(null) && (
+                <option value={NULL_SENTINEL}>(Chưa gán)</option>
+              )}
+              {fwOptions.map(f => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Search */}
           <div className="md:col-span-1">
             <label className="text-sm">Tìm theo tên/email</label>
             <input
@@ -231,7 +405,7 @@ export default function TargetingPage() {
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-600">
             {loading ? 'Đang tải danh sách…' : `Có ${filtered.length} bản ghi`}
-            {selectedCount > 0 ? ` • Đã chọn ${selectedCount}` : ''}
+            {Object.keys(selected).length > 0 ? ` • Đã chọn ${Object.values(selected).filter(Boolean).length}` : ''}
           </div>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm">
@@ -256,12 +430,14 @@ export default function TargetingPage() {
       {/* Bảng danh sách */}
       <div className="border rounded-xl p-4 bg-white">
         <div className="overflow-auto">
-          <table className="min-w-[760px] w-full border-collapse">
+          <table className="min-w-[860px] w-full border-collapse">
             <thead>
               <tr className="border-b text-left">
                 <th className="py-2 pr-3 w-12">Chọn</th>
                 <th className="py-2 pr-3">Họ tên</th>
                 <th className="py-2 pr-3">Email</th>
+                <th className="py-2 pr-3">Bộ môn</th>
+                <th className="py-2 pr-3">Khung</th>
                 <th className="py-2 pr-3 w-32">Đối tượng</th>
               </tr>
             </thead>
@@ -279,13 +455,26 @@ export default function TargetingPage() {
                     </td>
                     <td className="py-2 pr-3">{p.name || '—'}</td>
                     <td className="py-2 pr-3">{p.email || '—'}</td>
+                    <td className="py-2 pr-3">
+                      {p.department_id
+                        ? (depMap[p.department_id] || `#${shortId(p.department_id)}`)
+                        : <span className="text-gray-500">(Chưa gán)</span>}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {p.framework_id
+                        ? (() => {
+                            const f = frameworks.find(x => x.id === p.framework_id);
+                            return fwLabel(f, p.framework_id);
+                          })()
+                        : <span className="text-gray-500">(Chưa gán)</span>}
+                    </td>
                     <td className="py-2 pr-3">{p.role === 'lecturer' ? 'Giảng viên' : 'Sinh viên'}</td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td className="py-6 text-center text-sm text-gray-500" colSpan={4}>
+                  <td className="py-6 text-center text-sm text-gray-500" colSpan={6}>
                     {loading ? 'Đang tải…' : 'Không có dữ liệu'}
                   </td>
                 </tr>
