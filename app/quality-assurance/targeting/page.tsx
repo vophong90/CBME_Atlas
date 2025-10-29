@@ -10,9 +10,9 @@ type Person = {
   name: string | null;
   email: string | null;
   role: RolePick;
-  department_id?: string | null;
-  framework_id?: string | null;
-  unit_id?: string | null;
+  department_id?: string | null; // từ view
+  framework_id?: string | null;  // từ view
+  unit_id?: string | null;       // từ view
 };
 
 type SurveyRow = {
@@ -45,7 +45,6 @@ export default function TargetingPage() {
   const [inviting, setInviting] = useState(false);
   const [toast, setToast] = useState<{ type: 'success'|'error'; text: string } | null>(null);
 
-  // Load surveys list (ưu tiên 'active' lên đầu)
   async function loadSurveys() {
     const { data, error } = await supabase
       .from('surveys')
@@ -55,13 +54,11 @@ export default function TargetingPage() {
     if (error) throw error;
     setSurveys((data ?? []) as SurveyRow[]);
     if (!preSurveyId && data && data.length) {
-      // chọn mặc định survey active đầu tiên nếu có
       const firstActive = (data as SurveyRow[]).find(s => s.status === 'active');
       if (firstActive) setSurveyId(firstActive.id);
     }
   }
 
-  // Load participants từ view qa_participants_view theo audience
   async function loadPeople(role: RolePick) {
     setLoading(true);
     setToast(null);
@@ -84,7 +81,6 @@ export default function TargetingPage() {
       })) as Person[];
 
       setPeople(rows);
-      // reset chọn
       setSelected({});
       setSelectAll(false);
     } catch (e: any) {
@@ -98,7 +94,6 @@ export default function TargetingPage() {
     loadSurveys().catch(e => setToast({ type: 'error', text: String(e?.message || e) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
   useEffect(() => {
     loadPeople(audience);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,7 +120,6 @@ export default function TargetingPage() {
       setSelected({});
     }
   }
-
   function toggleOne(id: string, checked: boolean) {
     setSelected(prev => ({ ...prev, [id]: checked }));
   }
@@ -144,31 +138,37 @@ export default function TargetingPage() {
     setInviting(true);
     setToast(null);
     try {
-      // Lấy các assignment đã tồn tại để tránh trùng
+      // đọc assignment đã có để tránh trùng (theo unique (survey_id, assigned_to))
       const { data: existed, error: e1 } = await supabase
         .from('survey_assignments')
-        .select('user_id')
+        .select('assigned_to')
         .eq('survey_id', surveyId);
       if (e1) throw e1;
 
-      const existedSet = new Set<string>((existed ?? []).map((r: any) => r.user_id as string));
-      const toAdd = ids.filter(uid => !existedSet.has(uid));
-
+      const existing = new Set<string>((existed ?? []).map((r: any) => r.assigned_to as string));
+      const toAdd = ids.filter(uid => !existing.has(uid));
       if (toAdd.length === 0) {
         setToast({ type: 'success', text: 'Tất cả đối tượng đã được mời trước đó' });
         return;
       }
 
-      // Chuẩn bị rows; nếu bảng của bạn yêu cầu cột khác, có thể thêm tại đây (vd status: 'invited')
-      const rows = toAdd.map(uid => ({
-        survey_id: surveyId,
-        user_id: uid,
-        role: audience,         // nếu cột role là NOT NULL
-        status: 'invited' as any, // nếu bảng có cột status
-        invited_by: null as any,  // để DB default auth.uid() (nếu có)
-      }));
+      // map dữ liệu đúng schema: assigned_to (không phải user_id)
+      const nowIso = new Date().toISOString();
+      const rows = toAdd.map(uid => {
+        const p = people.find(x => x.user_id === uid);
+        return {
+          survey_id: surveyId,
+          assigned_to: uid,
+          role: audience,               // check constraint: lecturer|student|support
+          // 3 cột dưới là text; bạn có thể map tên bộ môn/lớp nếu muốn
+          department: null as any,
+          cohort: null as any,
+          unit: null as any,
+          invited_at: nowIso,
+          // created_by default auth.uid()
+        };
+      });
 
-      // Thử insert “mềm” – chỉ những cột phổ biến. Nếu RLS/NOT NULL khác nhau, bạn có thể gỡ các field dư ra.
       const { error: e2 } = await supabase.from('survey_assignments').insert(rows);
       if (e2) throw e2;
 
@@ -186,7 +186,7 @@ export default function TargetingPage() {
         <h1 className="text-2xl font-semibold">Mời tham gia khảo sát</h1>
       </div>
 
-      {/* Bộ lọc */}
+      {/* Bộ lọc + chọn survey */}
       <div className="border rounded-xl p-4 bg-white space-y-3">
         <div className="grid md:grid-cols-4 gap-3">
           <div className="md:col-span-1">
@@ -201,7 +201,7 @@ export default function TargetingPage() {
             </select>
           </div>
 
-          <div className="md:col-span-2">
+        <div className="md:col-span-2">
             <label className="text-sm">Bảng khảo sát</label>
             <select
               className="w-full border rounded px-3 py-2"
@@ -253,7 +253,7 @@ export default function TargetingPage() {
         </div>
       </div>
 
-      {/* Bảng đối tượng */}
+      {/* Bảng danh sách */}
       <div className="border rounded-xl p-4 bg-white">
         <div className="overflow-auto">
           <table className="min-w-[760px] w-full border-collapse">
