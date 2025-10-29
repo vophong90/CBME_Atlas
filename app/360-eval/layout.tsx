@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
 /* ===== Inline icons (no deps) ===== */
@@ -27,27 +27,20 @@ const ChevronRight = (p: any) => (
 function truthy(x: any) {
   return x === true || x === 'true' || x === 1 || x === '1';
 }
-
-function getRole(profile: any): string | undefined {
-  return (profile?.role as string | undefined)
-      ?? (profile?.app_role as string | undefined)
-      ?? (profile?.user_role as string | undefined);
-}
-
 function hasAnyRole(profile: any, roles: string[]): boolean {
-  const r = getRole(profile);
+  if (!profile) return false;
+  const r = profile.role as string | undefined;
   if (r && roles.includes(r)) return true;
 
-  const arr = Array.isArray(profile?.roles) ? profile.roles : [];
+  const arr = Array.isArray(profile.roles) ? profile.roles : [];
   if (arr.some((x: any) => roles.includes(String(x)))) return true;
 
-  // Các cờ boolean phổ biến
-  if (roles.includes('admin') && truthy(profile?.is_admin)) return true;
-  if (roles.includes('qa') && truthy(profile?.is_qa)) return true;
+  if (roles.includes('admin') && truthy(profile.is_admin)) return true;
+  if (roles.includes('qa') && truthy(profile.is_qa)) return true;
 
-  // Một số alias thường gặp
-  if (roles.includes('admin') && truthy(profile?.admin)) return true;
-  if (roles.includes('qa') && truthy(profile?.qa)) return true;
+  // alias dự phòng
+  if (roles.includes('admin') && truthy((profile as any).admin)) return true;
+  if (roles.includes('qa') && truthy((profile as any).qa)) return true;
 
   return false;
 }
@@ -55,7 +48,7 @@ function hasAnyRole(profile: any, roles: string[]): boolean {
 export default function Eval360Layout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -72,26 +65,30 @@ export default function Eval360Layout({ children }: { children: React.ReactNode 
     } catch {}
   }, [collapsed]);
 
-  // Quy ước hiển thị/cho phép vào tab QA/Admin
-  const canSeeQA = hasAnyRole(profile, ['admin', 'qa']);
+  // Tính quyền sau khi profile sẵn sàng
+  const canSeeQA = useMemo(() => hasAnyRole(profile, ['admin', 'qa']), [profile]);
 
-  // Chặn truy cập trực tiếp vào các route hạn chế
+  // Chặn truy cập trực tiếp vào các route hạn chế — chỉ chạy khi loading=false
   const RESTRICTED = ['/360-eval/forms', '/360-eval/results'];
   useEffect(() => {
+    if (loading) return;
     if (!canSeeQA && RESTRICTED.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
       router.replace('/360-eval/evaluate');
     }
-  }, [canSeeQA, pathname, router]);
+  }, [loading, canSeeQA, pathname, router]);
 
-  const TABS = [
-    { href: '/360-eval/evaluate', label: 'Thực hiện đánh giá' },
-    ...(canSeeQA
-      ? [
-          { href: '/360-eval/forms', label: 'Quản lý biểu mẫu' },
-          { href: '/360-eval/results', label: 'Kết quả theo MSSV' },
-        ]
-      : []),
-  ];
+  const TABS = useMemo(
+    () => [
+      { href: '/360-eval/evaluate', label: 'Thực hiện đánh giá' },
+      ...(canSeeQA
+        ? [
+            { href: '/360-eval/forms', label: 'Quản lý biểu mẫu' },
+            { href: '/360-eval/results', label: 'Kết quả theo MSSV' },
+          ]
+        : []),
+    ],
+    [canSeeQA]
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50/60 to-white text-slate-900">
@@ -222,6 +219,12 @@ export default function Eval360Layout({ children }: { children: React.ReactNode 
                 })}
               </div>
             </div>
+            {/* Thông báo nhỏ khi đang tải quyền */}
+            {loading && (
+              <div className="mt-3 text-xs text-slate-500">
+                Đang tải quyền truy cập… (admin/QA sẽ thấy thêm tab sau khi tải xong)
+              </div>
+            )}
           </div>
 
           {children}
