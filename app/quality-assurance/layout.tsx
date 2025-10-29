@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { BarChart3, Grid3x3 } from 'lucide-react';
 
 /** ==== Minimal inline icons (no external deps) ==== */
 type IconProps = React.SVGProps<SVGSVGElement>;
@@ -54,8 +55,8 @@ const NAV = [
   { key: 'surveys',   label: 'Surveys',   href: '/quality-assurance/surveys',   Icon: ClipboardIcon },
   { key: 'targeting', label: 'Targeting', href: '/quality-assurance/targeting', Icon: UsersIcon },
   { key: 'progress',  label: 'Progress',  href: '/quality-assurance/progress',  Icon: ActivityIcon },
-  { key: 'results',   label: 'Results',   href: '/quality-assurance/results',   Icon: BarChartIcon },
-  { key: 'heatmap',   label: 'Heatmap',   href: '/quality-assurance/heatmap',   Icon: BarChartIcon },
+  { key: 'results', label: 'Results', href: '/quality-assurance/results', Icon: BarChart3 },
+  { key: 'heatmap', label: 'Heatmap', href: '/quality-assurance/heatmap', Icon: Grid3x3 },
 ];
 
 export default function QALayout({ children }: { children: React.ReactNode }) {
