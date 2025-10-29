@@ -202,22 +202,7 @@ export default function Eval360Layout({ children }: { children: React.ReactNode 
                 <h1 className="text-2xl font-semibold">Đánh giá 360°</h1>
                 <p className="text-sm text-slate-600">Peer • Self • Faculty • Supervisor • Patient</p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {TABS.map((t) => {
-                  const active = pathname === t.href || pathname.startsWith(t.href + '/');
-                  return (
-                    <Link
-                      key={t.href}
-                      href={t.href}
-                      className={`px-3 py-1.5 rounded-lg text-sm ${
-                        active ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      {t.label}
-                    </Link>
-                  );
-                })}
-              </div>
+              {/* BỎ cụm nút tab ở đầu trang theo yêu cầu */}
             </div>
             {/* Thông báo nhỏ khi đang tải quyền */}
             {loading && (
