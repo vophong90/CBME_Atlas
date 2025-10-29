@@ -58,8 +58,8 @@ const DEFAULT_COLS: RubricColumn[] = [
   { key: 'good', label: 'Good' },
 ];
 
-async function fetchJson(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
+async function fetchJson(url: string, init: RequestInit = {}) {
+  const res = await fetch(url, { credentials: 'include', ...init });
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
     const text = await res.text();
