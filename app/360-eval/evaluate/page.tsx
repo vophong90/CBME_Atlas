@@ -15,7 +15,7 @@ type Rubric = {
 
 type StudentOpt = { user_id: string; label: string };
 
-// =============== Combobox async (inline, no deps) ===============
+// =============== Combobox async (đã sửa) ===============
 function AsyncStudentCombobox({
   value,
   onChange,
@@ -31,6 +31,7 @@ function AsyncStudentCombobox({
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [opts, setOpts] = useState<StudentOpt[]>([]);
+  const [err, setErr] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState('');
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -43,18 +44,26 @@ function AsyncStudentCombobox({
     return () => window.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  // fetch theo q (debounce)
+  // fetch theo q (DEBOUNCE) — khi mở combobox, nếu q rỗng vẫn gọi API để lấy top 50
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(async () => {
-      if (!q.trim()) { setOpts([]); return; }
       try {
         setLoading(true);
-        const r = await fetch(`/api/360/students?q=${encodeURIComponent(q.trim())}`);
+        setErr(null);
+        const url = q.trim()
+          ? `/api/360/students?q=${encodeURIComponent(q.trim())}`
+          : `/api/360/students`;
+        const r = await fetch(url, { credentials: 'include' });
         const d = await r.json();
-        const items: StudentOpt[] = (d.items || []).map((x: any) => ({ user_id: x.user_id, label: x.label }));
+        if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách');
+        const items: StudentOpt[] = (d.items || []).map((x: any) => ({
+          user_id: x.user_id,
+          label: x.label,
+        }));
         setOpts(items);
-      } catch {
+      } catch (e: any) {
+        setErr(e?.message || 'Lỗi tải dữ liệu');
         setOpts([]);
       } finally {
         setLoading(false);
@@ -63,8 +72,8 @@ function AsyncStudentCombobox({
     return () => clearTimeout(t);
   }, [q, open]);
 
+  // cập nhật label hiển thị khi có value
   useEffect(() => {
-    // nếu có value mà chưa có selectedLabel, cố tìm trong opts; nếu không, giữ nguyên
     if (!value) { setSelectedLabel(''); return; }
     const match = opts.find(o => o.user_id === value);
     if (match) setSelectedLabel(match.label);
@@ -99,8 +108,11 @@ function AsyncStudentCombobox({
           </div>
           <div className="max-h-64 overflow-auto border-t">
             {loading && <div className="px-3 py-2 text-sm text-slate-500">Đang tìm…</div>}
-            {!loading && opts.length === 0 && <div className="px-3 py-2 text-sm text-slate-500">Không có kết quả</div>}
-            {!loading && opts.map(o => (
+            {err && !loading && <div className="px-3 py-2 text-sm text-red-600">{err}</div>}
+            {!loading && !err && opts.length === 0 && (
+              <div className="px-3 py-2 text-sm text-slate-500">Không có kết quả</div>
+            )}
+            {!loading && !err && opts.map(o => (
               <button
                 key={o.user_id}
                 onClick={() => { onChange(o); setSelectedLabel(o.label); setOpen(false); }}
@@ -143,7 +155,6 @@ export default function Eval360DoPage() {
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Khi chọn "self": auto set evaluatee = chính mình, khóa combobox
   useEffect(() => {
     if (group === 'self' && selfUserId) {
       setEvaluatee({ user_id: selfUserId, label: `${selfName} (Tự đánh giá)` });
@@ -152,10 +163,9 @@ export default function Eval360DoPage() {
     }
   }, [group, selfUserId, selfName]);
 
-  // nạp biểu mẫu theo group
   useEffect(() => {
     (async () => {
-      const r = await fetch(`/api/360/forms?group_code=${group}&status=active`);
+      const r = await fetch(`/api/360/forms?group_code=${group}&status=active`, { credentials: 'include' });
       const d = await r.json();
       setForms((d.items || []).map((x: any) => ({ id: x.id, title: x.title, rubric_id: x.rubric_id })));
       setRubricId('');
@@ -164,9 +174,7 @@ export default function Eval360DoPage() {
     })();
   }, [group]);
 
-  // nạp nội dung rubric khi chọn biểu mẫu
   async function loadRubricDef(id: string) {
-    // Ưu tiên endpoint nội bộ nếu bạn đã tạo
     const tryUrls = [
       `/api/_internal/rubric?id=${id}`,
       `/api/_raw/rubric?id=${id}`,
@@ -174,10 +182,9 @@ export default function Eval360DoPage() {
     ];
     for (const u of tryUrls) {
       try {
-        const r = await fetch(u);
+        const r = await fetch(u, { credentials: 'include' });
         if (!r.ok) continue;
         const d = await r.json();
-        // chấp nhận d.rubric hoặc d.data hoặc d.item
         const rb: Rubric | null = d.rubric || d.data || d.item || null;
         if (rb?.definition?.rows && rb?.definition?.columns) {
           setRubric(rb);
@@ -202,10 +209,10 @@ export default function Eval360DoPage() {
     if (!rubric || !evaluatee?.user_id) return;
     try {
       setLoading(true);
-      // 1) tạo evaluation_request ad-hoc
       const st = await fetch('/api/360/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           evaluatee_user_id: evaluatee.user_id,
           rubric_id: rubric.id,
@@ -215,7 +222,6 @@ export default function Eval360DoPage() {
       const sd = await st.json();
       if (!st.ok) throw new Error(sd?.error || 'Không tạo được request');
 
-      // 2) submit điểm
       const items = rubric.definition.rows.map((row) => ({
         item_key: row.key,
         selected_level: answers[row.key],
@@ -226,6 +232,7 @@ export default function Eval360DoPage() {
       const sb = await fetch('/api/360/submit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           request_id: sd.request_id,
           rubric_id: rubric.id,
