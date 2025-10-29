@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     // 2) thông tin survey (tuỳ schema có/không open_at/close_at)
     const sRes = await sb
       .from('surveys')
-      .select('id, title, status, created_at, updated_at, open_at, close_at')
+      .select('id, title, status, created_at, updated_at')
       .in('id', surveyIds);
 
     if (sRes.error) {
@@ -71,8 +71,8 @@ export async function GET(req: Request) {
             status: s.status,
             created_at: s.created_at,
             updated_at: s.updated_at,
-            open_at: s.open_at ?? null,
-            close_at: s.close_at ?? null,
+            open_at: null,
+            close_at: null,
           },
           assignment: assigns.find((a: any) => a.survey_id === s.id) ?? null,
           response: resp
