@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
-type GroupCode = 'self'|'peer'|'faculty'|'supervisor'|'patient';
+type GroupCode = 'self' | 'peer' | 'faculty' | 'supervisor' | 'patient';
 
 type Row = { key: string; label: string };
 type Col = { key: string; label: string };
@@ -52,7 +52,7 @@ function normalizeRubric(raw: any): Rubric | null {
   };
 }
 
-/** Robust JSON fetch: nổ lỗi nếu server trả HTML/không phải JSON */
+/** Robust JSON fetch: báo lỗi nếu server trả HTML/không phải JSON */
 async function fetchJson(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
   const ct = res.headers.get('content-type') || '';
@@ -99,6 +99,7 @@ function AsyncStudentCombobox({
     return () => window.removeEventListener('mousedown', onClickOutside);
   }, []);
 
+  // fetch theo q (debounce)
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(async () => {
@@ -124,6 +125,7 @@ function AsyncStudentCombobox({
     return () => clearTimeout(t);
   }, [q, open]);
 
+  // cập nhật label khi có value
   useEffect(() => {
     if (!value) {
       setSelectedLabel('');
@@ -222,15 +224,16 @@ function AsyncStudentCombobox({
 
 /* ==================== Page ==================== */
 export default function Eval360DoPage() {
-  const { profile } = useAuth();
+  const { profile } = useAuth(); // có thể null với khách (anon)
   const selfUserId = (profile as any)?.user_id ?? null;
   const selfName = profile?.name ?? (profile as any)?.email ?? 'Tôi';
 
   const [group, setGroup] = useState<GroupCode>('peer');
   const [evaluatee, setEvaluatee] = useState<{ user_id: string; label: string } | null>(null);
 
+  // Danh sách FORM: id (form_id), title, rubric_id
   const [forms, setForms] = useState<Array<{ id: string; title: string; rubric_id: string }>>([]);
-  const [rubricId, setRubricId] = useState('');
+  const [formId, setFormId] = useState<string>(''); // chọn theo form.id
   const [rubric, setRubric] = useState<Rubric | null>(null);
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -238,6 +241,7 @@ export default function Eval360DoPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
 
+  // Tự gán evaluatee khi group=self và có selfUserId
   useEffect(() => {
     if (group === 'self' && selfUserId) {
       setEvaluatee({ user_id: selfUserId, label: `${selfName} (Tự đánh giá)` });
@@ -246,14 +250,12 @@ export default function Eval360DoPage() {
     }
   }, [group, selfUserId, selfName]);
 
-  // Lấy danh sách form: **/api/360/form** (không có 's')
+  // Lấy danh sách form: **/api/360/form** (SINGULAR)
   useEffect(() => {
     (async () => {
       try {
         setErr('');
-        const url = `/api/360/form?group_code=${encodeURIComponent(
-          group
-        )}&status=active`;
+        const url = `/api/360/form?group_code=${encodeURIComponent(group)}&status=active`;
         const d = await fetchJson(url, { credentials: 'include' });
         setForms(
           (d.items || []).map((x: any) => ({
@@ -266,17 +268,19 @@ export default function Eval360DoPage() {
         setForms([]);
         setErr(e?.message || 'Lỗi tải biểu mẫu');
       } finally {
-        setRubricId('');
+        // reset khi đổi nhóm
+        setFormId('');
         setRubric(null);
         setAnswers({});
       }
     })();
   }, [group]);
 
-  async function loadRubricDef(id: string) {
+  // Load rubric theo rubric_id của form được chọn
+  async function loadRubricDef(rubricId: string) {
     setErr('');
     try {
-      const d = await fetchJson(`/api/rubrics/get?id=${encodeURIComponent(id)}`, {
+      const d = await fetchJson(`/api/rubrics/get?id=${encodeURIComponent(rubricId)}`, {
         credentials: 'include',
       });
       const norm = normalizeRubric(d.item || d.rubric || d.data || d);
@@ -289,10 +293,15 @@ export default function Eval360DoPage() {
     }
   }
 
-  useEffect(() => {
-    if (!rubricId) return;
-    loadRubricDef(rubricId);
-  }, [rubricId]);
+  function onPickForm(newFormId: string) {
+    setFormId(newFormId);
+    const f = forms.find((x) => x.id === newFormId);
+    if (f?.rubric_id) {
+      loadRubricDef(f.rubric_id);
+    } else {
+      setRubric(null);
+    }
+  }
 
   const canSubmit = useMemo(() => {
     if (!evaluatee?.user_id || !rubric) return false;
@@ -300,22 +309,23 @@ export default function Eval360DoPage() {
   }, [evaluatee, rubric, answers]);
 
   async function handleSubmit() {
-    if (!rubric || !evaluatee?.user_id) return;
+    if (!rubric || !evaluatee?.user_id || !formId) return;
     try {
       setLoading(true);
       setErr('');
 
+      // 1) tạo request bằng form_id
       const st = await fetchJson('/api/360/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
+          form_id: formId,
           evaluatee_user_id: evaluatee.user_id,
-          rubric_id: rubric.id,
-          group_code: group,
         }),
       });
 
+      // 2) lập danh sách items theo rubric
       const items = rubric.definition.rows.map((row) => ({
         item_key: row.key,
         selected_level: answers[row.key],
@@ -323,6 +333,7 @@ export default function Eval360DoPage() {
         comment: null,
       }));
 
+      // 3) submit kết quả
       await fetchJson('/api/360/submit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -339,6 +350,8 @@ export default function Eval360DoPage() {
       setAnswers({});
       setComment('');
       if (group !== 'self') setEvaluatee(null);
+      setFormId('');
+      setRubric(null);
     } catch (e: any) {
       setErr(e?.message || 'Lỗi gửi đánh giá');
     } finally {
@@ -382,17 +395,17 @@ export default function Eval360DoPage() {
         </div>
       </div>
 
-      {/* Chọn biểu mẫu */}
+      {/* Chọn biểu mẫu (theo form_id) */}
       <div className="rounded-xl border bg-white p-4">
         <label className="text-xs font-semibold">Chọn biểu mẫu</label>
         <select
-          value={rubricId}
-          onChange={(e) => setRubricId(e.target.value)}
+          value={formId}
+          onChange={(e) => onPickForm(e.target.value)}
           className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
         >
           <option value="">— Chọn —</option>
           {forms.map((f) => (
-            <option key={f.id} value={f.rubric_id}>
+            <option key={f.id} value={f.id}>
               {f.title}
             </option>
           ))}
