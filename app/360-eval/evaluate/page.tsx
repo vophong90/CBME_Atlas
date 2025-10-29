@@ -6,26 +6,54 @@ import { useAuth } from '@/components/AuthProvider';
 
 type GroupCode = 'self'|'peer'|'faculty'|'supervisor'|'patient';
 
-type AnyRow = { id?: string; key?: string; label: string };
-type AnyCol = { key: string; label: string };
+type Row = { key: string; label: string };
+type Col = { key: string; label: string };
 type Rubric = {
   id: string;
   title: string;
-  definition: { rows: AnyRow[]; columns: AnyCol[] };
+  definition: { rows: Row[]; columns: Col[] };
 };
 
 type StudentOpt = { user_id: string; label: string };
 
-function rowId(r: AnyRow): string {
-  return (r.id || r.key || '').toString();
+/* =============== Helpers =============== */
+function slugKey(s: string, prefix: string, i: number) {
+  const base = (s || '').toLowerCase().normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const k = base || `${prefix}${i+1}`;
+  return k;
 }
 
-// =============== Async combobox SV ===============
+function normalizeRubric(raw: any): Rubric | null {
+  if (!raw) return null;
+  const def = raw.definition || {};
+  const colsSrc = Array.isArray(def.columns) ? def.columns : [];
+  const rowsSrc = Array.isArray(def.rows) ? def.rows : [];
+
+  const columns: Col[] = colsSrc.map((c: any, i: number) => ({
+    key: String(c?.key ?? slugKey(String(c?.label ?? ''), 'c', i)),
+    label: String(c?.label ?? c?.key ?? `Level ${i+1}`),
+  }));
+
+  const rows: Row[] = rowsSrc.map((r: any, i: number) => ({
+    key: String(r?.key ?? r?.id ?? slugKey(String(r?.label ?? ''), 'r', i)),
+    label: String(r?.label ?? r?.key ?? r?.id ?? `Criterion ${i+1}`),
+  }));
+
+  if (!columns.length || !rows.length) return null;
+
+  return {
+    id: String(raw.id),
+    title: String(raw.title ?? 'Rubric'),
+    definition: { rows, columns },
+  };
+}
+
+/* =============== Combobox async (giữ nguyên) =============== */
 function AsyncStudentCombobox({
-  value,
-  onChange,
-  disabled,
-  placeholder = 'Nhập MSSV hoặc tên để tìm…',
+  value, onChange, disabled, placeholder = 'Nhập MSSV hoặc tên để tìm…',
 }: {
   value: string | null;
   onChange: (val: { user_id: string; label: string } | null) => void;
@@ -141,7 +169,7 @@ function AsyncStudentCombobox({
   );
 }
 
-// ==================== Page ====================
+/* ==================== Page ==================== */
 export default function Eval360DoPage() {
   const { profile } = useAuth();
   const selfUserId = (profile as any)?.user_id ?? null;
@@ -150,7 +178,6 @@ export default function Eval360DoPage() {
   const [group, setGroup] = useState<GroupCode>('peer');
   const [evaluatee, setEvaluatee] = useState<{ user_id: string; label: string } | null>(null);
 
-  // lấy form theo group_code từ API mới: /api/360/form
   const [forms, setForms] = useState<Array<{ id: string; title: string; rubric_id: string }>>([]);
   const [rubricId, setRubricId] = useState('');
   const [rubric, setRubric] = useState<Rubric | null>(null);
@@ -158,8 +185,8 @@ export default function Eval360DoPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string>('');
 
-  // auto-self
   useEffect(() => {
     if (group === 'self' && selfUserId) {
       setEvaluatee({ user_id: selfUserId, label: `${selfName} (Tự đánh giá)` });
@@ -168,16 +195,17 @@ export default function Eval360DoPage() {
     }
   }, [group, selfUserId, selfName]);
 
-  // list forms (đúng route mới)
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`/api/360/form?group_code=${group}&status=active`, { credentials: 'include' });
+        setErr('');
+        const r = await fetch(`/api/360/forms?group_code=${group}&status=active`, { credentials: 'include' });
         const d = await r.json();
-        if (!r.ok) throw new Error(d?.error || 'Không tải được biểu mẫu');
+        if (!r.ok) throw new Error(d?.error || 'Không tải được danh sách biểu mẫu');
         setForms((d.items || []).map((x: any) => ({ id: x.id, title: x.title, rubric_id: x.rubric_id })));
-      } catch {
+      } catch (e: any) {
         setForms([]);
+        setErr(e?.message || 'Lỗi tải biểu mẫu');
       } finally {
         setRubricId('');
         setRubric(null);
@@ -186,32 +214,20 @@ export default function Eval360DoPage() {
     })();
   }, [group]);
 
-  // load rubric.definition (giữ fallback đa endpoint như trước)
   async function loadRubricDef(id: string) {
-    const tryUrls = [
-      `/api/rubrics/get?id=${id}`,
-      `/api/_internal/rubric?id=${id}`,
-      `/api/_raw/rubric?id=${id}`,
-    ];
-    for (const u of tryUrls) {
-      try {
-        const r = await fetch(u, { credentials: 'include' });
-        if (!r.ok) continue;
-        const d = await r.json();
-        const rb: Rubric | null = d.rubric || d.data || d.item || null;
-        if (rb?.definition?.rows && rb?.definition?.columns) {
-          // chuẩn hoá rows: luôn có id dùng để chấm
-          rb.definition.rows = rb.definition.rows.map((row: AnyRow) => ({
-            ...row,
-            id: rowId(row),
-          }));
-          setRubric(rb);
-          setAnswers({});
-          return;
-        }
-      } catch { /* next */ }
+    setErr('');
+    try {
+      const r = await fetch(`/api/rubrics/get?id=${encodeURIComponent(id)}`, { credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Không lấy được rubric');
+      const norm = normalizeRubric(d.item || d.rubric || d.data || d);
+      if (!norm) throw new Error('Rubric thiếu hàng/cột');
+      setRubric(norm);
+      setAnswers({});
+    } catch (e: any) {
+      setRubric(null);
+      setErr(e?.message || 'Không tải được rubric.definition');
     }
-    alert('Không tải được rubric.definition');
   }
 
   useEffect(() => {
@@ -220,15 +236,17 @@ export default function Eval360DoPage() {
   }, [rubricId]);
 
   const canSubmit = useMemo(() => {
-    const need = rubric?.definition?.rows?.length || 0;
-    return !!evaluatee?.user_id && !!rubric && Object.keys(answers).length >= need;
+    if (!evaluatee?.user_id || !rubric) return false;
+    // yêu cầu chọn đủ 1 mức cho mỗi dòng
+    return rubric.definition.rows.every((row) => !!answers[row.key]);
   }, [evaluatee, rubric, answers]);
 
   async function handleSubmit() {
     if (!rubric || !evaluatee?.user_id) return;
     try {
       setLoading(true);
-      // giữ nguyên flow start → submit nội bộ như code cũ của bạn
+      setErr('');
+
       const st = await fetch('/api/360/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -242,15 +260,12 @@ export default function Eval360DoPage() {
       const sd = await st.json();
       if (!st.ok) throw new Error(sd?.error || 'Không tạo được request');
 
-      const items = rubric.definition.rows.map((row) => {
-        const rid = rowId(row);
-        return {
-          item_key: rid,                         // dùng ID chuẩn hoá (id||key)
-          selected_level: answers[rid],          // col.key
-          score: null,
-          comment: null,
-        };
-      });
+      const items = rubric.definition.rows.map((row) => ({
+        item_key: row.key,
+        selected_level: answers[row.key],
+        score: null,
+        comment: null,
+      }));
 
       const sb = await fetch('/api/360/submit', {
         method: 'POST',
@@ -270,10 +285,8 @@ export default function Eval360DoPage() {
       setAnswers({});
       setComment('');
       if (group !== 'self') setEvaluatee(null);
-      setRubricId('');
-      setRubric(null);
     } catch (e: any) {
-      alert(e?.message || 'Lỗi gửi đánh giá');
+      setErr(e?.message || 'Lỗi gửi đánh giá');
     } finally {
       setLoading(false);
     }
@@ -281,7 +294,7 @@ export default function Eval360DoPage() {
 
   return (
     <div className="space-y-4">
-      {/* Chọn nhóm & SV */}
+      {/* Chọn đối tượng & SV */}
       <div className="rounded-xl border bg-white p-4">
         <div className="grid gap-4 md:grid-cols-3">
           <div>
@@ -324,6 +337,7 @@ export default function Eval360DoPage() {
             <option key={f.id} value={f.rubric_id}>{f.title}</option>
           ))}
         </select>
+        {err && <div className="mt-2 text-sm text-red-600">{err}</div>}
       </div>
 
       {/* Render rubric */}
@@ -341,24 +355,21 @@ export default function Eval360DoPage() {
                 </tr>
               </thead>
               <tbody>
-                {rubric.definition.rows.map(row => {
-                  const rid = rowId(row);
-                  return (
-                    <tr key={rid}>
-                      <td className="border px-3 py-2">{row.label}</td>
-                      {rubric.definition.columns.map(col => (
-                        <td key={col.key} className="border px-3 py-2 text-center">
-                          <input
-                            type="radio"
-                            name={`row-${rid}`}
-                            checked={answers[rid]===col.key}
-                            onChange={()=>setAnswers(a=>({ ...a, [rid]: col.key }))}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                {rubric.definition.rows.map(row => (
+                  <tr key={row.key}>
+                    <td className="border px-3 py-2">{row.label}</td>
+                    {rubric.definition.columns.map(col => (
+                      <td key={col.key} className="border px-3 py-2 text-center">
+                        <input
+                          type="radio"
+                          name={`row-${row.key}`}
+                          checked={answers[row.key]===col.key}
+                          onChange={()=>setAnswers(a=>({ ...a, [row.key]: col.key }))}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
