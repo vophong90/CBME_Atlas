@@ -47,11 +47,26 @@ const ClipboardIcon = (p: IconProps) => (
     <path d="M9 4h6v3H9zM8 11h8M8 15h8" strokeWidth={1.75} strokeLinecap="round" />
   </svg>
 );
+const GridIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth={1.75} />
+    <path d="M9 3v18M15 3v18M3 9h18M3 15h18" strokeWidth={1.75} />
+  </svg>
+);
+
+const BookIcon = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...p}>
+    <path d="M4 6a2 2 0 0 1 2-2h12v16H6a2 2 0 0 1-2-2V6z" strokeWidth={1.75} />
+    <path d="M8 4v16" strokeWidth={1.75} />
+  </svg>
+);
 
 /** ===== Nav config ===== */
 const NAV = [
   { href: '/student/plo',      label: 'PLO',       Icon: FlagIcon },
   { href: '/student/pi',       label: 'PI',        Icon: TargetIcon },
+  { href: '/student/rubrics',  label: 'Rubric',    Icon: GridIcon },
+  { href: '/student/courses',  label: 'Học phần',  Icon: BookIcon },
   { href: '/student/feedback', label: 'Góp ý',     Icon: MessageIcon },
   { href: '/student/surveys',  label: 'Khảo sát',  Icon: ClipboardIcon },
 ];
