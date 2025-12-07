@@ -41,7 +41,7 @@ export async function POST(
     );
   }
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
 
   const { data: rows, error } = await sb
     .from('survey_assignments')
