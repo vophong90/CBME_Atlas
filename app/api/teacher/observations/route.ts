@@ -58,7 +58,7 @@ async function resolveStudentPK(
 
 export async function GET(req: Request) {
   try {
-    const supabase = getSupabaseFromRequest();
+    const supabase = await getSupabaseFromRequest();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -144,7 +144,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const supabase = getSupabaseFromRequest();
+    const supabase = await getSupabaseFromRequest();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -275,7 +275,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const supabase = getSupabaseFromRequest();
+    const supabase = await getSupabaseFromRequest();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
