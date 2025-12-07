@@ -15,7 +15,7 @@ function viRole(code?: string | null) {
 
 export async function GET(req: Request) {
   try {
-    const sb = createServerClient();
+    const sb = await createServerClient();
     const {
       data: { user },
       error: authErr,
