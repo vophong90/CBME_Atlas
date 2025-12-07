@@ -22,23 +22,37 @@ const PatchSchema = z.object({
   remove: z.array(z.string().uuid()).optional().default([]),
 });
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }          // 👈 params là Promise
+) {
+  const { id } = await ctx.params;                  // 👈 lấy id
   const sb = createServerClient();
   const { data, error } = await sb
     .from('survey_questions')
     .select('*')
-    .eq('survey_id', params.id)
+    .eq('survey_id', id)
     .order('sort_order', { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ questions: data ?? [] });
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }          // 👈 params là Promise
+) {
+  const { id } = await ctx.params;                  // 👈 lấy id
+
   const body = await req.json().catch(() => ({}));
   const parsed = PatchSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+    return NextResponse.json(
+      { error: parsed.error.message },
+      { status: 400 }
+    );
   }
 
   const { create, update, remove } = parsed.data;
@@ -47,7 +61,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   // 1) Inserts
   if (create.length) {
     const rows = create.map((q) => ({
-      survey_id: params.id,
+      survey_id: id,
       text: q.text,
       qtype: q.qtype,
       sort_order: q.sort_order,
@@ -55,7 +69,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       options: q.options ?? null,
     }));
     const { error } = await sb.from('survey_questions').insert(rows);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
   }
 
   // 2) Updates
@@ -70,13 +86,20 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         options: q.options ?? null,
       })
       .eq('id', q.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
   }
 
   // 3) Deletes
   if (remove.length) {
-    const { error } = await sb.from('survey_questions').delete().in('id', remove);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { error } = await sb
+      .from('survey_questions')
+      .delete()
+      .in('id', remove);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ ok: true });
