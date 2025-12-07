@@ -26,9 +26,9 @@ type CLO = {
 };
 
 type FrameworkRow = {
-  doi_tuong: string;
-  chuyen_nganh: string;
-  nien_khoa: string;
+  doi_tuong: string | null;
+  chuyen_nganh: string | null;
+  nien_khoa: string | null;
 };
 
 export default function StudentCoursesPage() {
@@ -48,7 +48,7 @@ export default function StudentCoursesPage() {
   // Helper: lấy tên khung từ curriculum_frameworks
   const fetchFrameworkLabel = async (fwId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('curriculum_frameworks')
         .select('doi_tuong, chuyen_nganh, nien_khoa')
         .eq('id', fwId)
@@ -82,24 +82,24 @@ export default function StudentCoursesPage() {
         let stu: StudentRow | null = null;
 
         if (uid) {
-          const { data, error } = await supabase
+          const { data, error } = await (supabase as any)
             .from('students')
             .select('id, framework_id, full_name, mssv, student_code, user_id')
             .eq('user_id', uid)
             .maybeSingle();
           if (error) throw error;
-          stu = data;
+          stu = (data ?? null) as StudentRow | null;
         }
 
         // fallback theo MSSV nếu chưa map user_id
         if (!stu && mssv) {
-          const { data, error } = await supabase
+          const { data, error } = await (supabase as any)
             .from('students')
             .select('id, framework_id, full_name, mssv, student_code, user_id')
             .eq('mssv', mssv)
             .maybeSingle();
           if (error) throw error;
-          stu = data;
+          stu = (data ?? null) as StudentRow | null;
         }
 
         if (!stu || !stu.framework_id) {
@@ -137,14 +137,14 @@ export default function StudentCoursesPage() {
     (async () => {
       setErr(null);
       try {
-        const { data, error } = await supabase
+        const { data, error } = await (supabase as any)
           .from('courses')
           .select('course_code, course_name, credits')
           .eq('framework_id', frameworkId)
           .order('course_code', { ascending: true });
 
         if (error) throw error;
-        setCourses(data || []);
+        setCourses((data ?? []) as Course[]);
       } catch (e: any) {
         setErr(e?.message ?? 'Lỗi tải danh sách học phần.');
       }
@@ -160,7 +160,7 @@ export default function StudentCoursesPage() {
     (async () => {
       setErr(null);
       try {
-        const { data, error } = await supabase
+        const { data, error } = await (supabase as any)
           .from('clos')
           .select('clo_code, clo_text')
           .eq('framework_id', frameworkId)
@@ -168,7 +168,7 @@ export default function StudentCoursesPage() {
           .order('clo_code', { ascending: true });
 
         if (error) throw error;
-        setClos(data || []);
+        setClos((data ?? []) as CLO[]);
       } catch (e: any) {
         setErr(e?.message ?? 'Lỗi tải CLO của học phần.');
       }
@@ -265,7 +265,9 @@ export default function StudentCoursesPage() {
                 <tbody>
                   {clos.map((r) => (
                     <tr key={r.clo_code} className="hover:bg-slate-50">
-                      <td className="border-b border-slate-100 px-3 py-2 font-medium text-slate-800">{r.clo_code}</td>
+                      <td className="border-b border-slate-100 px-3 py-2 font-medium text-slate-800">
+                        {r.clo_code}
+                      </td>
                       <td className="border-b border-slate-100 px-3 py-2 text-slate-700">
                         {r.clo_text || <span className="text-slate-400">—</span>}
                       </td>
