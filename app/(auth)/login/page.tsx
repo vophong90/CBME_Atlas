@@ -46,10 +46,15 @@ export default function LoginPage() {
   // Nếu đã có session -> đi thẳng tới next (tránh kẹt /login)
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getSession().then((res) => {
+
+    (async () => {
+      const { data } = await supabase.auth.getSession();
       if (!mounted) return;
-      if (res.data?.session) router.replace(nextUrl);
-    });
+      if (data?.session) {
+        router.replace(nextUrl);
+      }
+    })();
+
     return () => {
       mounted = false;
     };
