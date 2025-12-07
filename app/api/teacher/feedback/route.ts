@@ -14,7 +14,7 @@ type Body = {
 
 export async function POST(req: Request) {
   try {
-    const supabase = getSupabase(); // KHÔNG cần await
+    const supabase = await getSupabase(); // KHÔNG cần await
 
     const {
       data: { user },
