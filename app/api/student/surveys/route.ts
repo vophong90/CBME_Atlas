@@ -7,7 +7,7 @@ import { createServerClient } from '@/lib/supabaseServer';
 
 export async function GET(req: Request) {
   try {
-    const sb = createServerClient(); // RLS theo user
+    const sb = await createServerClient(); // RLS theo user
     const {
       data: { user },
       error: authErr,
