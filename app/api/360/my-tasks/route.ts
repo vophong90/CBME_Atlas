@@ -1,25 +1,14 @@
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-import { NextResponse } from 'next/server';
-import { getSupabaseFromRequest } from '@/lib/supabaseServer';
-
-/**
- * Trả về danh sách "yêu cầu đánh giá" (evaluation_requests)
- * của người dùng hiện tại (evaluator_user_id = user.id)
- * kèm thông tin campaign + evaluatee.
- */
 export async function GET(req: Request) {
   try {
-    const supabase = getSupabaseFromRequest(req);
+    const supabase = getSupabaseFromRequest();
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ items: [] }, { status: 200 });
 
     const url = new URL(req.url);
-    const status = url.searchParams.get('status') || ''; // 'pending' | 'submitted' | ''
+    const status = url.searchParams.get('status') || '';
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
 
-    // Lấy requests của chính người dùng
     let qReq = supabase
       .from('evaluation_requests')
       .select(`
@@ -48,8 +37,8 @@ export async function GET(req: Request) {
 
     let items = (data || []).map((r: any) => ({
       id: r.id,
-      status: r.status,                 // 'pending' | 'submitted' | ...
-      group_code: r.group_code,         // 'self' | 'peer' | 'faculty' | 'supervisor' | 'patient'
+      status: r.status,
+      group_code: r.group_code,
       campaign: {
         id: r.campaigns?.id ?? r.campaign_id,
         name: r.campaigns?.name ?? null,
