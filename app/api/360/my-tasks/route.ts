@@ -12,7 +12,8 @@ import { getSupabaseFromRequest } from '@/lib/supabaseServer';
  */
 export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseFromRequest();
+    // ⭐ MUST await vì getSupabaseFromRequest() trả về Promise<SupabaseClient>
+    const supabase = await getSupabaseFromRequest();
 
     const {
       data: { user },
