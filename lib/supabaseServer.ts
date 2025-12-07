@@ -32,14 +32,16 @@ export const supabaseAdmin: SupabaseClient | undefined = (() => {
 
 /* ----------------------- Server clients (RLS, có session) ------------------- */
 /**
- * Route Handler (app/api/...)
- * Ở phiên bản mới: KHÔNG còn createRouteHandlerClient
- * → phải tự tạo client + set cookie thủ công
+ * Route Handler client (app/api/...)
+ *  → Next.js 14+ : cookies() TRẢ VỀ PROMISE
+ *  → Không còn createRouteHandlerClient
  */
-export function getSupabaseFromRequest(): SupabaseClient {
-  const cookieStore = cookies();
+export async function getSupabaseFromRequest(): Promise<SupabaseClient> {
+  const cookieStore = await cookies(); // ⭐ MUST await in Next.js 14+
 
-  const client = createSbClient(
+  const accessToken = cookieStore.get('sb-access-token')?.value ?? '';
+
+  return createSbClient(
     requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
     requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
     {
@@ -50,24 +52,18 @@ export function getSupabaseFromRequest(): SupabaseClient {
       },
       global: {
         headers: {
-          // Supabase sẽ đọc access_token từ cookie (đã được middleware set)
-          Authorization: `Bearer ${cookieStore.get('sb-access-token')?.value ?? ''}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       },
     }
   );
-
-  return client;
 }
 
-/**
- * Server Components hoặc Server Actions
- * → dùng createServerComponentClient
- */
+/* ----------------------- Server Components / Actions ----------------------- */
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 
-export function getSupabase(): SupabaseClient {
-  const cookieStore = cookies();
+export async function getSupabase(): Promise<SupabaseClient> {
+  const cookieStore = await cookies();
   return createServerComponentClient({
     cookies: () => cookieStore,
   }) as unknown as SupabaseClient;
