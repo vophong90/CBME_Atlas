@@ -21,10 +21,9 @@ const ACCESS: Array<{ prefix: string; allowed: RoleCode[] }> = [
   { prefix: '/department',        allowed: ['admin', 'dept_secretary', 'dept_lead'] },
   { prefix: '/teacher',           allowed: ['admin', 'lecturer'] },
   { prefix: '/student',           allowed: ['admin', 'student'] },
-  // /360-eval mở hoàn toàn → không đưa vào ACCESS
 ];
 
-// Các đường dẫn public (không yêu cầu đăng nhập)
+// Public routes
 const PUBLIC_PATHS = new Set<string>(['/', '/login', '/error', '/360-eval']);
 
 function matches(path: string, prefix: string) {
@@ -40,15 +39,18 @@ function readRolesFromSessionMeta(session: any): string[] {
   const user = session?.user;
   const um = user?.user_metadata ?? {};
   const am = user?.app_metadata ?? {};
+
   const pushMaybe = (v: unknown) => {
     if (!v) return;
     if (Array.isArray(v)) codes.push(...(v as any[]).map(String));
     else codes.push(String(v));
   };
+
   pushMaybe(um.role);
   pushMaybe(um.roles);
   pushMaybe(am.role);
   pushMaybe(am.roles);
+
   return unique(codes).filter(Boolean);
 }
 
@@ -59,9 +61,7 @@ async function getRoleCodes(supabase: any, session: any): Promise<string[]> {
   try {
     const { data, error } = await supabase.rpc('fn_my_role_codes');
     if (!error && Array.isArray(data)) return data as string[];
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   try {
     const { data: urs, error: e1 } = await supabase
@@ -78,8 +78,8 @@ async function getRoleCodes(supabase: any, session: any): Promise<string[]> {
       .in('id', roleIds);
     if (e2 || !roles?.length) return metaCodes;
 
-    const dbCodes = roles.map((r: any) => r.code as string).filter(Boolean);
-    return unique([...(metaCodes ?? []), ...dbCodes]);
+    const dbCodes = roles.map((r: any) => r.code);
+    return unique([...metaCodes, ...dbCodes]);
   } catch {
     return metaCodes ?? [];
   }
@@ -88,7 +88,7 @@ async function getRoleCodes(supabase: any, session: any): Promise<string[]> {
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Bỏ qua static & API
+  // Static and API skip
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/assets') ||
@@ -98,19 +98,21 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // /360-eval (và route con) là public
+  // Public 360-eval
   if (pathname === '/360-eval' || pathname.startsWith('/360-eval/')) {
     return NextResponse.next();
   }
 
+  // Other public paths
   if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next();
   }
 
+  // Check access rules
   const rule = ACCESS.find((r) => matches(pathname, r.prefix));
   if (!rule) return NextResponse.next();
 
-  // Response gốc để Supabase ghi cookie
+  // Create base response for Supabase cookie injection
   let res = NextResponse.next({ request: req });
 
   const supabase = createServerClient(
@@ -121,36 +123,42 @@ export async function middleware(req: NextRequest) {
         getAll() {
           return req.cookies.getAll();
         },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            res.cookies.set(name, value, options as CookieOptions);
-          });
+        set(name: string, value: string, options: CookieOptions) {
+          res.cookies.set(name, value, options);
         },
       },
     }
   );
 
-  // Lấy session
+  // Load session
   const {
     data: { session },
   } = await supabase.auth.getSession();
 
+  // Not logged in → redirect to login
   if (!session) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('next', pathname + (search || ''));
 
     const redirect = NextResponse.redirect(loginUrl);
-    // copy cookies từ res (nếu có)
-    redirect.cookies.setAll(res.cookies.getAll());
+
+    // Copy cookies from res → redirect (manual loop)
+    for (const c of res.cookies.getAll()) {
+      redirect.cookies.set(c.name, c.value, c);
+    }
+
     return redirect;
   }
 
+  // Fetch user roles
   const codes = await getRoleCodes(supabase, session);
 
+  // Admin bypass
   if (codes.includes('admin')) {
     return res;
   }
 
+  // Check allowed roles
   const allowed = codes.some((c) => rule.allowed.includes(c as RoleCode));
   if (!allowed) {
     const home = new URL('/', req.url);
@@ -158,7 +166,12 @@ export async function middleware(req: NextRequest) {
     home.searchParams.set('reason', codes.length ? 'not-allowed' : 'no-roles');
 
     const redirect = NextResponse.redirect(home);
-    redirect.cookies.setAll(res.cookies.getAll());
+
+    // Copy cookies
+    for (const c of res.cookies.getAll()) {
+      redirect.cookies.set(c.name, c.value, c);
+    }
+
     return redirect;
   }
 
