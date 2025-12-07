@@ -2,12 +2,7 @@
 import 'server-only';
 
 import { cookies } from 'next/headers';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createClient as createSbClient } from '@supabase/supabase-js';
-import {
-  createRouteHandlerClient,
-  createServerComponentClient,
-} from '@supabase/auth-helpers-nextjs';
+import { createClient as createSbClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /* ----------------------------- ENV helpers ------------------------------ */
 function requireEnv(name: string): string {
@@ -17,16 +12,16 @@ function requireEnv(name: string): string {
 }
 
 /* ------------------- Service client (bypass RLS/policies) ------------------- */
-/** Dùng cho tác vụ admin (server-only), bỏ qua RLS. */
+/** Dùng cho tác vụ admin (server-only), bỏ qua RLS */
 export function createServiceClient(): SupabaseClient {
   const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
   const serviceKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+
   return createSbClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
-/** Tuỳ chọn: singleton admin (nếu thiếu ENV thì undefined) */
 export const supabaseAdmin: SupabaseClient | undefined = (() => {
   try {
     return createServiceClient();
@@ -36,18 +31,46 @@ export const supabaseAdmin: SupabaseClient | undefined = (() => {
 })();
 
 /* ----------------------- Server clients (RLS, có session) ------------------- */
-// Dùng trong Route Handlers (ví dụ: app/api/.../route.ts).
-// Đọc session từ cookie (cookie đã được refresh bởi middleware).
-export function getSupabaseFromRequest(_req?: Request): SupabaseClient {
+/**
+ * Route Handler (app/api/...)
+ * Ở phiên bản mới: KHÔNG còn createRouteHandlerClient
+ * → phải tự tạo client + set cookie thủ công
+ */
+export function getSupabaseFromRequest(): SupabaseClient {
   const cookieStore = cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore }) as unknown as SupabaseClient;
+
+  const client = createSbClient(
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        headers: {
+          // Supabase sẽ đọc access_token từ cookie (đã được middleware set)
+          Authorization: `Bearer ${cookieStore.get('sb-access-token')?.value ?? ''}`,
+        },
+      },
+    }
+  );
+
+  return client;
 }
 
-// Dùng trong Server Components / Server Actions nếu cần.
+/**
+ * Server Components hoặc Server Actions
+ * → dùng createServerComponentClient
+ */
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+
 export function getSupabase(): SupabaseClient {
   const cookieStore = cookies();
-  return createServerComponentClient({ cookies: () => cookieStore }) as unknown as SupabaseClient;
+  return createServerComponentClient({
+    cookies: () => cookieStore,
+  }) as unknown as SupabaseClient;
 }
 
-/** Alias tương thích code cũ (nếu có import createServerClient) */
 export const createServerClient = getSupabase;
