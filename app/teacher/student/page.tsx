@@ -2,10 +2,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-// ❌ bỏ auth-helpers-nextjs
-// import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-// ✅ dùng client chung của app
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabase } from "@/lib/supabase-browser";
 
 type FrameworkOpt = { id: string; label: string };
 type StudentOpt = {
@@ -29,8 +26,7 @@ const INPUT =
   "h-10 text-sm rounded-lg border border-slate-300 px-3 outline-none focus:ring-2 focus:ring-brand-300";
 
 export default function TeacherStudentPage() {
-  // ❌ không còn cần createClientComponentClient
-  // const supabase = createClientComponentClient();
+  const supabase = getSupabase();
 
   // Always return HeadersInit to satisfy TS
   const authHeaders = async (): Promise<HeadersInit> => {
@@ -195,8 +191,7 @@ export default function TeacherStudentPage() {
       {/* Table */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 font-medium">
-          CLO đã học nhưng{" "}
-          <span className="text-red-600">chưa đạt</span>
+          CLO đã học nhưng <span className="text-red-600">chưa đạt</span>
         </div>
 
         {/* Header */}
