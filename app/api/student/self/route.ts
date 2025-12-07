@@ -8,7 +8,7 @@ import { createServerClient, createServiceClient } from '@/lib/supabaseServer';
 export async function GET() {
   try {
     // Lấy user hiện tại từ cookie (RLS)
-    const sb = createServerClient();
+    const sb = await createServerClient();
     const {
       data: { user },
       error: authErr,
