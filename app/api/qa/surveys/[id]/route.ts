@@ -14,7 +14,7 @@ export async function GET(
 ) {
   const { id } = await ctx.params;
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
   const [{ data: survey }, { data: questions }] = await Promise.all([
     sb.from('surveys').select('*').eq('id', id).single(),
     sb
@@ -46,7 +46,7 @@ export async function PATCH(
     );
   }
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
   const { data, error } = await sb
     .from('surveys')
     .update({ ...parsed.data, updated_at: new Date().toISOString() })
@@ -67,7 +67,7 @@ export async function DELETE(
 ) {
   const { id } = await ctx.params;
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
   const { error } = await sb.from('surveys').delete().eq('id', id);
 
   if (error) {
