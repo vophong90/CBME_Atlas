@@ -27,7 +27,7 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> }          // 👈 params là Promise
 ) {
   const { id } = await ctx.params;                  // 👈 lấy id
-  const sb = createServerClient();
+  const sb = await createServerClient();
   const { data, error } = await sb
     .from('survey_questions')
     .select('*')
