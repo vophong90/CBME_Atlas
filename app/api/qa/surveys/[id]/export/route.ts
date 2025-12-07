@@ -1,10 +1,16 @@
-export const runtime = 'nodejs';           // XLSX cần Node, không chạy ở Edge
+// app/api/qa/surveys/[id]/export/route.ts (hoặc tương tự)
+// XLSX cần Node, không chạy ở Edge
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const surveyId = params.id;
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }   // 👈 đổi kiểu params thành Promise
+) {
+  const { id } = await ctx.params;           // 👈 lấy id và nhớ await
+  const surveyId = id;
 
   // Lấy Supabase server client (tương thích nhiều cách export)
   let sb: any = null;
@@ -14,10 +20,16 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     else if (mod.supabaseAdmin) sb = mod.supabaseAdmin;
     else if (typeof mod.getSupabase === 'function') sb = mod.getSupabase();
   } catch {
-    return NextResponse.json({ error: 'Không tải được Supabase server client' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Không tải được Supabase server client' },
+      { status: 500 }
+    );
   }
   if (!sb) {
-    return NextResponse.json({ error: 'Supabase server client không khả dụng' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Supabase server client không khả dụng' },
+      { status: 500 }
+    );
   }
 
   // Dynamic import để tránh lỗi bundle
@@ -26,13 +38,20 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   // 1) Lấy survey, câu hỏi, responses
   const [surveyRes, qsRes, respRes] = await Promise.all([
-    sb.from('surveys').select('id,title,status,created_at').eq('id', surveyId).single(),
+    sb
+      .from('surveys')
+      .select('id,title,status,created_at')
+      .eq('id', surveyId)
+      .single(),
     sb
       .from('survey_questions')
       .select('id,text,qtype,options,sort_order')
       .eq('survey_id', surveyId)
       .order('sort_order', { ascending: true }),
-    sb.from('survey_responses').select('id,respondent_id,is_submitted,submitted_at').eq('survey_id', surveyId),
+    sb
+      .from('survey_responses')
+      .select('id,respondent_id,is_submitted,submitted_at')
+      .eq('survey_id', surveyId),
   ]);
 
   if (surveyRes.error) {
@@ -43,18 +62,25 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'Survey not found' }, { status: 404 });
   }
 
-  const questions = (qsRes.error && qsRes.error.code === '42P01') ? [] : (qsRes.data ?? []);
+  const questions =
+    qsRes.error && qsRes.error.code === '42P01' ? [] : (qsRes.data ?? []);
   if (qsRes.error && qsRes.error.code !== '42P01') {
     return NextResponse.json({ error: qsRes.error.message }, { status: 500 });
   }
 
-  const responses = (respRes.error && respRes.error.code === '42P01') ? [] : (respRes.data ?? []);
+  const responses =
+    respRes.error && respRes.error.code === '42P01' ? [] : (respRes.data ?? []);
   if (respRes.error && respRes.error.code !== '42P01') {
     return NextResponse.json({ error: respRes.error.message }, { status: 500 });
   }
 
   // 2) Lấy answers theo các response_id (nếu có)
-  let answers: Array<{ response_id: string; question_id: string; option: string | null; free_text: string | null }> = [];
+  let answers: Array<{
+    response_id: string;
+    question_id: string;
+    option: string | null;
+    free_text: string | null;
+  }> = [];
   const responseIds = responses.map((r: any) => r.id);
   if (responseIds.length > 0) {
     const ansRes = await sb
@@ -70,7 +96,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   // 3) Chuẩn bị dữ liệu sheet Responses: mỗi dòng = 1 response
   const qOrder = questions.map((q: any) => q.id);
-  const qLabel = new Map<string, string>(questions.map((q: any) => [q.id, q.text]));
+  const qLabel = new Map<string, string>(
+    questions.map((q: any) => [q.id, q.text])
+  );
 
   const rows: any[] = [];
   for (const r of responses) {
@@ -85,7 +113,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       const q = questions.find((qq: any) => qq.id === qid);
       const label = qLabel.get(qid) ?? qid;
       if (q?.qtype === 'text') {
-        const a = ansForResp.find((a) => a.question_id === qid && a.free_text != null);
+        const a = ansForResp.find(
+          (a) => a.question_id === qid && a.free_text != null
+        );
         row[label] = a?.free_text ?? '';
       } else {
         const vals = ansForResp
@@ -99,7 +129,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   // 4) Tạo workbook
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Responses');
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(rows),
+    'Responses'
+  );
 
   const questionSheet = questions.map((q: any) => ({
     sort_order: q.sort_order,
@@ -107,7 +141,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     qtype: q.qtype,
     options: q.options ? JSON.stringify(q.options) : '',
   }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(questionSheet), 'Questions');
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(questionSheet),
+    'Questions'
+  );
 
   // 5) Trả file .xlsx
   const buffer: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -116,7 +154,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   return new NextResponse(buffer, {
     status: 200,
     headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-store',
     },
