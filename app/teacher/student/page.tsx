@@ -1,11 +1,19 @@
 // app/teacher/student/page.tsx
-'use client';
+"use client";
 
-import React, { useEffect, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import React, { useEffect, useState } from "react";
+// ❌ bỏ auth-helpers-nextjs
+// import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+// ✅ dùng client chung của app
+import { supabase } from "@/lib/supabaseClient";
 
 type FrameworkOpt = { id: string; label: string };
-type StudentOpt = { user_id: string; mssv: string; full_name: string; label: string };
+type StudentOpt = {
+  user_id: string;
+  mssv: string;
+  full_name: string;
+  label: string;
+};
 
 type Row = {
   mssv: string;
@@ -18,21 +26,26 @@ type Row = {
 };
 
 const INPUT =
-  'h-10 text-sm rounded-lg border border-slate-300 px-3 outline-none focus:ring-2 focus:ring-brand-300';
+  "h-10 text-sm rounded-lg border border-slate-300 px-3 outline-none focus:ring-2 focus:ring-brand-300";
 
 export default function TeacherStudentPage() {
-  const supabase = createClientComponentClient();
+  // ❌ không còn cần createClientComponentClient
+  // const supabase = createClientComponentClient();
 
   // Always return HeadersInit to satisfy TS
   const authHeaders = async (): Promise<HeadersInit> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session?.access_token
+      ? { Authorization: `Bearer ${session.access_token}` }
+      : {};
   };
 
   const [frameworks, setFrameworks] = useState<FrameworkOpt[]>([]);
-  const [frameworkId, setFrameworkId] = useState('');
+  const [frameworkId, setFrameworkId] = useState("");
   const [students, setStudents] = useState<StudentOpt[]>([]);
-  const [studentUserId, setStudentUserId] = useState('');
+  const [studentUserId, setStudentUserId] = useState("");
 
   const [items, setItems] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,8 +54,8 @@ export default function TeacherStudentPage() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/frameworks', {
-          credentials: 'include',
+        const r = await fetch("/api/frameworks", {
+          credentials: "include",
           headers: await authHeaders(),
         });
         const d = await r.json();
@@ -50,7 +63,7 @@ export default function TeacherStudentPage() {
           setFrameworks(d.items || []);
           if (!frameworkId && d.items?.[0]?.id) setFrameworkId(d.items[0].id);
         } else {
-          console.error('frameworks error:', d?.error || d);
+          console.error("frameworks error:", d?.error || d);
         }
       } catch (e) {
         console.error(e);
@@ -62,26 +75,29 @@ export default function TeacherStudentPage() {
   // When framework changes -> load students
   useEffect(() => {
     setStudents([]);
-    setStudentUserId('');
+    setStudentUserId("");
     setItems([]);
     if (!frameworkId) return;
 
     (async () => {
       try {
-        const r = await fetch(`/api/teacher/students?framework_id=${frameworkId}`, {
-          credentials: 'include',
-          headers: await authHeaders(),
-        });
+        const r = await fetch(
+          `/api/teacher/students?framework_id=${frameworkId}`,
+          {
+            credentials: "include",
+            headers: await authHeaders(),
+          }
+        );
         const d = await r.json();
         if (r.ok) {
           setStudents(d.items || []);
         } else {
           setStudents([]);
-          alert(d.error || 'Lỗi tải danh sách sinh viên');
+          alert(d.error || "Lỗi tải danh sách sinh viên");
         }
       } catch (e: any) {
         setStudents([]);
-        alert(e?.message || 'Lỗi tải danh sách sinh viên');
+        alert(e?.message || "Lỗi tải danh sách sinh viên");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,29 +105,32 @@ export default function TeacherStudentPage() {
 
   // Load student's pending CLOs
   async function loadPending() {
-    if (!frameworkId) return alert('Vui lòng chọn Khung');
-    if (!studentUserId) return alert('Vui lòng chọn Sinh viên');
+    if (!frameworkId) return alert("Vui lòng chọn Khung");
+    if (!studentUserId) return alert("Vui lòng chọn Sinh viên");
 
     setLoading(true);
     try {
       const p = new URLSearchParams();
-      p.set('student_user_id', studentUserId);
-      p.set('framework_id', frameworkId);
+      p.set("student_user_id", studentUserId);
+      p.set("framework_id", frameworkId);
 
-      const r = await fetch(`/api/teacher/student-pending-clos?${p.toString()}`, {
-        credentials: 'include',
-        headers: await authHeaders(),
-      });
+      const r = await fetch(
+        `/api/teacher/student-pending-clos?${p.toString()}`,
+        {
+          credentials: "include",
+          headers: await authHeaders(),
+        }
+      );
       const d = await r.json();
       if (r.ok) {
         setItems(d.items || []);
       } else {
         setItems([]);
-        alert(d.error || 'Lỗi tải CLO chưa đạt');
+        alert(d.error || "Lỗi tải CLO chưa đạt");
       }
     } catch (e: any) {
       setItems([]);
-      alert(e?.message || 'Lỗi tải CLO chưa đạt');
+      alert(e?.message || "Lỗi tải CLO chưa đạt");
     } finally {
       setLoading(false);
     }
@@ -151,9 +170,9 @@ export default function TeacherStudentPage() {
             <option value="">
               {frameworkId
                 ? students.length
-                  ? '— Chọn Sinh viên —'
-                  : 'Không có SV trong khung'
-                : 'Hãy chọn Khung trước'}
+                  ? "— Chọn Sinh viên —"
+                  : "Không có SV trong khung"
+                : "Hãy chọn Khung trước"}
             </option>
             {students.map((s) => (
               <option key={s.user_id} value={s.user_id}>
@@ -168,7 +187,7 @@ export default function TeacherStudentPage() {
             onClick={loadPending}
             disabled={!frameworkId || !studentUserId || loading}
           >
-            {loading ? 'Đang tải…' : 'Tải CLO chưa đạt'}
+            {loading ? "Đang tải…" : "Tải CLO chưa đạt"}
           </button>
         </div>
       </div>
@@ -176,7 +195,8 @@ export default function TeacherStudentPage() {
       {/* Table */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 font-medium">
-          CLO đã học nhưng <span className="text-red-600">chưa đạt</span>
+          CLO đã học nhưng{" "}
+          <span className="text-red-600">chưa đạt</span>
         </div>
 
         {/* Header */}
@@ -192,7 +212,10 @@ export default function TeacherStudentPage() {
         {loading ? (
           <div className="divide-y divide-slate-100">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="grid grid-cols-5 gap-0 px-4 py-3 animate-pulse">
+              <div
+                key={i}
+                className="grid grid-cols-5 gap-0 px-4 py-3 animate-pulse"
+              >
                 <div className="h-4 w-20 bg-slate-200 rounded" />
                 <div className="h-4 w-40 bg-slate-200 rounded" />
                 <div className="h-4 w-52 bg-slate-200 rounded" />
@@ -206,7 +229,9 @@ export default function TeacherStudentPage() {
             Hãy chọn <b>Khung</b> và <b>Sinh viên</b> để xem dữ liệu.
           </div>
         ) : items.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-500">Không có CLO chưa đạt.</div>
+          <div className="px-4 py-6 text-sm text-slate-500">
+            Không có CLO chưa đạt.
+          </div>
         ) : (
           <div className="divide-y divide-slate-100">
             {items.map((r, idx) => (
@@ -215,13 +240,13 @@ export default function TeacherStudentPage() {
                 className="grid grid-cols-5 px-4 py-2 text-sm"
               >
                 <div className="truncate">{r.mssv}</div>
-                <div className="truncate">{r.full_name || '—'}</div>
+                <div className="truncate">{r.full_name || "—"}</div>
                 <div className="truncate" title={r.course_name}>
-                  {r.course_name || r.course_code || '—'}
+                  {r.course_name || r.course_code || "—"}
                 </div>
                 <div className="truncate">{r.clo_code}</div>
-                <div className="truncate" title={r.clo_text || ''}>
-                  {r.clo_text || '—'}
+                <div className="truncate" title={r.clo_text || ""}>
+                  {r.clo_text || "—"}
                 </div>
               </div>
             ))}
