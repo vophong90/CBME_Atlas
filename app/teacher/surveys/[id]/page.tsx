@@ -1,7 +1,8 @@
+// app/teacher/surveys/[id]/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
 
 type QType = 'single' | 'multi' | 'text';
@@ -28,10 +29,9 @@ type FormState = Record<
   { single?: string; multi?: string[]; text?: string }
 >;
 
-export default function StudentDoSurveyPage() {
-  const supabase = getSupabase();
+export default function TeacherDoSurveyPage() {
+  const supabase = getSupabase() as any; // ép any để tránh lỗi never
   const params = useParams<{ id: string }>();
-  const router = useRouter();
 
   const surveyId = params.id;
 
@@ -381,7 +381,9 @@ export default function StudentDoSurveyPage() {
               type="button"
               disabled={saving || submitting || isSubmitted}
               onClick={onSaveDraft}
-              className={`px-3 py-2 rounded border ${saving || submitting || isSubmitted ? 'bg-gray-100 text-gray-400' : 'bg-white hover:bg-slate-50'}`}
+              className={`px-3 py-2 rounded border ${
+                saving || submitting || isSubmitted ? 'bg-gray-100 text-gray-400' : 'bg-white hover:bg-slate-50'
+              }`}
             >
               Lưu nháp
             </button>
@@ -389,7 +391,9 @@ export default function StudentDoSurveyPage() {
               type="button"
               disabled={submitting || isSubmitted}
               onClick={onSubmit}
-              className={`px-3 py-2 rounded text-white ${submitting || isSubmitted ? 'bg-gray-400' : 'bg-black'}`}
+              className={`px-3 py-2 rounded text-white ${
+                submitting || isSubmitted ? 'bg-gray-400' : 'bg-black'
+              }`}
             >
               {isSubmitted ? 'Đã gửi' : submitting ? 'Đang gửi…' : 'Gửi nộp'}
             </button>
