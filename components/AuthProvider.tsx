@@ -1,3 +1,4 @@
+// components/AuthProvider.tsx
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
@@ -60,7 +61,7 @@ const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
   .filter(Boolean);
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const supabase = getSupabase();
+  const supabase = getSupabase() as any; // ép any để tránh chuỗi lỗi never
   const router = useRouter();
 
   const [user, setUser] = useState<any | null>(null);
@@ -70,7 +71,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   async function loadProfile(uid: string, u?: any) {
     try {
       // 1) Staff (join department)
-      const { data: stf } = await supabase
+      const stfRes = await supabase
         .from('staff')
         .select(
           `
@@ -83,24 +84,26 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         )
         .eq('user_id', uid)
         .maybeSingle();
+      const stf = (stfRes.data as any) || null;
 
       // 2) Student
-      const { data: std } = await supabase
+      const stdRes = await supabase
         .from('students')
         .select('user_id, full_name, mssv')
         .eq('user_id', uid)
         .maybeSingle();
+      const std = (stdRes.data as any) || null;
 
       // 3) Roles từ user_roles → roles (code)
-      const { data: ur } = await supabase
+      const urRes = await supabase
         .from('user_roles')
         .select('role:roles!user_roles_role_id_fkey(code)')
         .eq('staff_user_id', uid);
+      const ur = (urRes.data as any[]) || [];
 
-      const roles =
-        (ur || [])
-          .map((r: any) => r?.role?.code)
-          .filter(Boolean) as string[];
+      const roles = ur
+        .map((r: any) => r?.role?.code)
+        .filter(Boolean) as string[];
 
       // Email & tên hiển thị
       const email: string | null = u?.email ?? stf?.email ?? null;
@@ -176,7 +179,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       if (u) await loadProfile(u.id, u);
       setLoading(false);
 
-      const sub = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const sub = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {
         const uu = session?.user ?? null;
         setUser(uu);
         if (uu) {
@@ -203,7 +206,10 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     router.push('/'); // hoặc '/login'
   };
 
-  const value = useMemo(() => ({ user, profile, loading, signOut }), [user, profile, loading]);
+  const value = useMemo(
+    () => ({ user, profile, loading, signOut }),
+    [user, profile, loading]
+  );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
