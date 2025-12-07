@@ -17,7 +17,7 @@ export async function GET(
   const { id } = await ctx.params;           // 👈 lấy id từ params
   const surveyId = id;
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
 
   // 1) Assignments
   const asgRes = await sb
