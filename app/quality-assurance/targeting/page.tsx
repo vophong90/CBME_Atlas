@@ -4,12 +4,13 @@ import TargetingClient from './TargetingClient';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-export default function TargetingPage({
+export default async function TargetingPage({
   searchParams,
 }: {
-  searchParams?: { surveyId?: string };
+  searchParams: Promise<{ surveyId?: string }>;
 }) {
-  const preSurveyId = (searchParams?.surveyId ?? '').toString();
+  const sp = await searchParams;
+  const preSurveyId = (sp?.surveyId ?? '').toString();
 
   return (
     <Suspense fallback={<div className="p-6">Đang tải trang mời khảo sát…</div>}>
