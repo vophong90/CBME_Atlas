@@ -1,4 +1,3 @@
-// app/api/qa/surveys/[id]/assignments/route.ts
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
@@ -10,9 +9,9 @@ const Body = z.object({
 
 export async function POST(
   req: Request,
-  ctx: { params: Promise<{ id: string }> }   // 👈 params là Promise
+  ctx: { params: Promise<{ id: string }> }   // nếu muốn chuẩn Next hơn có thể bỏ Promise, nhưng tạm để cũng được
 ) {
-  const { id } = await ctx.params;           // 👈 lấy id từ params
+  const { id } = await ctx.params;           // lấy id từ params
 
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
@@ -22,7 +21,8 @@ export async function POST(
     );
   }
 
-  const sb = createServerClient();
+  // ⭐⭐ PHẢI await
+  const sb = await createServerClient();
 
   const { data: rows, error: e1 } = await sb
     .from('qa_participants_view')
@@ -35,7 +35,7 @@ export async function POST(
 
   const recs =
     rows?.map((r) => ({
-      survey_id: id,                      // 👈 dùng id đã lấy
+      survey_id: id,
       user_id: r.user_id,
       user_email: r.user_email,
       user_name: r.user_name,
