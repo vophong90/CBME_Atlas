@@ -1,16 +1,31 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 
 type Column = { key: string; label: string };
 type Row    = { id: string; label: string };
-type Rubric = { id: string; title: string; threshold?: number|null; definition: { columns: Column[]; rows: Row[] } };
-type Form   = { id: string; title: string; group_code: string; rubric_id: string; slug: string };
+type Rubric = {
+  id: string;
+  title: string;
+  threshold?: number | null;
+  definition: { columns: Column[]; rows: Row[] };
+};
+type Form   = {
+  id: string;
+  title: string;
+  group_code: string;
+  rubric_id: string;
+  slug: string;
+};
 
-export default function PublicRunner({ params }: { params: { slug: string } }) {
-  const { slug } = params;
-  const [form, setForm] = useState<Form|null>(null);
-  const [rubric, setRubric] = useState<Rubric|null>(null);
+export default function PublicRunner() {
+  const params = useParams<{ slug: string }>();
+  const rawSlug = params?.slug;
+  const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug || '';
+
+  const [form, setForm] = useState<Form | null>(null);
+  const [rubric, setRubric] = useState<Rubric | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
@@ -19,8 +34,9 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
   const [raterRel, setRaterRel] = useState('');
   const [note, setNote] = useState('');
   const [consent, setConsent] = useState(false);
-  const [answers, setAnswers] = useState<Record<string,string>>({});
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+
   const allAnswered = useMemo(() => {
     const total = rubric?.definition?.rows?.length || 0;
     const picked = Object.keys(answers).length;
@@ -28,9 +44,12 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
   }, [answers, rubric]);
 
   useEffect(() => {
+    if (!slug) return; // chưa có slug thì chưa fetch
+
     (async () => {
       try {
         setLoading(true);
+        setErr('');
         const r = await fetch(`/api/360/public/form/${encodeURIComponent(slug)}`);
         const d = await r.json();
         if (!r.ok) throw new Error(d?.error || 'Không tải được biểu mẫu.');
@@ -45,7 +64,7 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
   }, [slug]);
 
   function pick(rowId: string, colKey: string) {
-    setAnswers(a => ({ ...a, [rowId]: colKey }));
+    setAnswers((a) => ({ ...a, [rowId]: colKey }));
   }
 
   async function submit() {
@@ -55,6 +74,7 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
       if (!mssv.trim()) throw new Error('Vui lòng nhập MSSV của người được đánh giá.');
       if (!consent) throw new Error('Bạn cần đồng ý đồng thuận (consent).');
       if (!rubric) throw new Error('Thiếu rubric.');
+      if (!slug) throw new Error('Thiếu thông tin biểu mẫu (slug).');
 
       const r = await fetch('/api/360/public/submit', {
         method: 'POST',
@@ -66,15 +86,20 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
           note: note.trim() || undefined,
           rater_name: raterName.trim() || undefined,
           rater_relation: raterRel.trim() || undefined,
-          consent: true
-        })
+          consent: true,
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'Gửi kết quả thất bại');
 
       alert('Cám ơn bạn đã hoàn thành đánh giá!');
       // reset tối thiểu
-      setMssv(''); setRaterName(''); setRaterRel(''); setNote(''); setConsent(false); setAnswers({});
+      setMssv('');
+      setRaterName('');
+      setRaterRel('');
+      setNote('');
+      setConsent(false);
+      setAnswers({});
     } catch (e: any) {
       setErr(e?.message || 'Lỗi gửi kết quả.');
     } finally {
@@ -82,30 +107,80 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
     }
   }
 
-  if (loading) return <div className="rounded-xl border bg-white p-4">Đang tải…</div>;
-  if (err) return <div className="rounded-xl border bg-white p-4 text-red-600">{err}</div>;
-  if (!form || !rubric) return <div className="rounded-xl border bg-white p-4">Không tìm thấy biểu mẫu.</div>;
+  if (!slug) {
+    return (
+      <div className="rounded-xl border bg-white p-4">
+        Không xác định được biểu mẫu (slug không hợp lệ).
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border bg-white p-4">
+        Đang tải…
+      </div>
+    );
+  }
+
+  if (err) {
+    return (
+      <div className="rounded-xl border bg-white p-4 text-red-600">
+        {err}
+      </div>
+    );
+  }
+
+  if (!form || !rubric) {
+    return (
+      <div className="rounded-xl border bg-white p-4">
+        Không tìm thấy biểu mẫu.
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-4">
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
         <div className="text-sm text-slate-500">Nhóm: {form.group_code}</div>
         <h1 className="text-xl font-semibold">{form.title}</h1>
-        <p className="text-sm text-slate-600">Vui lòng chọn 1 mức cho mỗi tiêu chí.</p>
+        <p className="text-sm text-slate-600">
+          Vui lòng chọn 1 mức cho mỗi tiêu chí.
+        </p>
       </div>
 
       <div className="rounded-xl border bg-white p-4">
         <div className="grid gap-3 md:grid-cols-2">
-          <input value={mssv} onChange={(e)=>setMssv(e.target.value)} className="rounded-lg border px-3 py-2 text-sm"
-                 placeholder="MSSV người được đánh giá (bắt buộc)" />
-          <input value={raterName} onChange={(e)=>setRaterName(e.target.value)} className="rounded-lg border px-3 py-2 text-sm"
-                 placeholder="Tên người chấm (không bắt buộc)" />
-          <input value={raterRel} onChange={(e)=>setRaterRel(e.target.value)} className="rounded-lg border px-3 py-2 text-sm"
-                 placeholder="Mối quan hệ/Vai trò (không bắt buộc)" />
-          <input value={note} onChange={(e)=>setNote(e.target.value)} className="rounded-lg border px-3 py-2 text-sm md:col-span-2"
-                 placeholder="Ghi chú thêm (không bắt buộc)" />
+          <input
+            value={mssv}
+            onChange={(e) => setMssv(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            placeholder="MSSV người được đánh giá (bắt buộc)"
+          />
+          <input
+            value={raterName}
+            onChange={(e) => setRaterName(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            placeholder="Tên người chấm (không bắt buộc)"
+          />
+          <input
+            value={raterRel}
+            onChange={(e) => setRaterRel(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            placeholder="Mối quan hệ/Vai trò (không bắt buộc)"
+          />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm md:col-span-2"
+            placeholder="Ghi chú thêm (không bắt buộc)"
+          />
           <label className="flex items-center gap-2 text-sm md:col-span-2">
-            <input type="checkbox" checked={consent} onChange={(e)=>setConsent(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
             Tôi đồng ý tham gia đánh giá và đồng ý với điều khoản bảo mật/thông tin.
           </label>
         </div>
@@ -116,22 +191,24 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
           <thead>
             <tr>
               <th className="border px-2 py-1 text-left">Tiêu chí</th>
-              {rubric.definition.columns.map(c =>
-                <th key={c.key} className="border px-2 py-1 text-center">{c.label}</th>
-              )}
+              {rubric.definition.columns.map((c) => (
+                <th key={c.key} className="border px-2 py-1 text-center">
+                  {c.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rubric.definition.rows.map(r => (
+            {rubric.definition.rows.map((r) => (
               <tr key={r.id}>
                 <td className="border px-2 py-1">{r.label}</td>
-                {rubric.definition.columns.map(c => (
+                {rubric.definition.columns.map((c) => (
                   <td key={c.key} className="border px-2 py-1 text-center">
                     <input
                       type="radio"
                       name={`row-${r.id}`}
                       checked={answers[r.id] === c.key}
-                      onChange={()=>pick(r.id, c.key)}
+                      onChange={() => pick(r.id, c.key)}
                     />
                   </td>
                 ))}
@@ -149,10 +226,18 @@ export default function PublicRunner({ params }: { params: { slug: string } }) {
         >
           {saving ? 'Đang gửi…' : 'Gửi đánh giá'}
         </button>
-        {!allAnswered && <div className="text-sm text-slate-500 self-center">Vui lòng chọn đủ tất cả tiêu chí.</div>}
+        {!allAnswered && (
+          <div className="self-center text-sm text-slate-500">
+            Vui lòng chọn đủ tất cả tiêu chí.
+          </div>
+        )}
       </div>
 
-      {err && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+      {err && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {err}
+        </div>
+      )}
     </div>
   );
 }
