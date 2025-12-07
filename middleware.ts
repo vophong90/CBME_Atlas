@@ -1,7 +1,7 @@
 // middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createClient as createSbClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 type RoleCode =
   | 'admin'
@@ -40,7 +40,6 @@ function readRolesFromSessionMeta(session: any): string[] {
   const user = session?.user;
   const um = user?.user_metadata ?? {};
   const am = user?.app_metadata ?? {};
-  // chấp nhận cả string lẫn array
   const pushMaybe = (v: unknown) => {
     if (!v) return;
     if (Array.isArray(v)) codes.push(...(v as any[]).map(String));
@@ -53,66 +52,22 @@ function readRolesFromSessionMeta(session: any): string[] {
   return unique(codes).filter(Boolean);
 }
 
-/* ----------------- Supabase client cho middleware (tự viết) ----------------- */
-
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
-
-/**
- * Thay thế createMiddlewareClient của auth-helpers
- * → đọc access token từ cookie 'sb-access-token'
- */
-function createMiddlewareClient(opts: {
-  req: NextRequest;
-  res: NextResponse; // giữ tham số cho tương thích, hiện chưa dùng
-}): SupabaseClient {
-  const accessToken = opts.req.cookies.get('sb-access-token')?.value ?? '';
-
-  return createSbClient(
-    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-      global: {
-        headers: {
-          Authorization: accessToken ? `Bearer ${accessToken}` : '',
-        },
-      },
-    }
-  );
-}
-
-/* --------------------------- Lấy role từ DB/meta --------------------------- */
-
-async function getRoleCodes(
-  supabase: SupabaseClient,
-  session: any
-): Promise<string[]> {
-  // 0) Fallback siêu nhanh từ session metadata (nếu có)
+async function getRoleCodes(supabase: any, session: any): Promise<string[]> {
   const metaCodes = readRolesFromSessionMeta(session);
   if (metaCodes.length) return metaCodes;
 
-  // 1) Thử RPC: public.fn_my_role_codes() → text[]
   try {
-    const { data, error } = await (supabase as any).rpc('fn_my_role_codes');
+    const { data, error } = await supabase.rpc('fn_my_role_codes');
     if (!error && Array.isArray(data)) return data as string[];
   } catch {
-    // ignore & fallback
+    // ignore
   }
 
-  // 2) Fallback chắc chắn chạy: lấy role_id từ user_roles → tra roles.id → code
   try {
     const { data: urs, error: e1 } = await supabase
       .from('user_roles')
       .select('role_id');
-    if (e1 || !urs?.length) return metaCodes; // vẫn trả về meta nếu có
+    if (e1 || !urs?.length) return metaCodes;
 
     const roleIds = urs.map((u: any) => u.role_id).filter(Boolean);
     if (!roleIds.length) return metaCodes;
@@ -130,12 +85,10 @@ async function getRoleCodes(
   }
 }
 
-/* -------------------------------- Middleware -------------------------------- */
-
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Bỏ qua static & API (API bảo vệ bằng RLS/handler)
+  // Bỏ qua static & API
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/assets') ||
@@ -145,25 +98,39 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // /360-eval (và route con) là public hoàn toàn
+  // /360-eval (và route con) là public
   if (pathname === '/360-eval' || pathname.startsWith('/360-eval/')) {
     return NextResponse.next();
   }
 
-  // Trang public khác
   if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next();
   }
 
-  // Có rule bảo vệ cho route này không?
   const rule = ACCESS.find((r) => matches(pathname, r.prefix));
   if (!rule) return NextResponse.next();
 
-  // Tạo response "gốc" (trước đây dùng để Supabase refresh cookie, giờ chỉ giữ cho tương thích)
-  const res = NextResponse.next();
-  const supabase = createMiddlewareClient({ req, res });
+  // Response gốc để Supabase ghi cookie
+  let res = NextResponse.next({ request: req });
 
-  // Bắt buộc phải đăng nhập
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            res.cookies.set(name, value, options as CookieOptions);
+          });
+        },
+      },
+    }
+  );
+
+  // Lấy session
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -172,26 +139,29 @@ export async function middleware(req: NextRequest) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('next', pathname + (search || ''));
 
-    // Trước đây copy set-cookie từ res (auth-helpers). Giờ không refresh nên bỏ qua bước này:
-    return NextResponse.redirect(loginUrl);
+    const redirect = NextResponse.redirect(loginUrl);
+    // copy cookies từ res (nếu có)
+    redirect.cookies.setAll(res.cookies.getAll());
+    return redirect;
   }
 
-  // Lấy các role code của user hiện tại (meta → RPC → DB)
   const codes = await getRoleCodes(supabase, session);
 
-  // admin → qua tất cả
-  if (codes.includes('admin')) return res;
+  if (codes.includes('admin')) {
+    return res;
+  }
 
-  // Kiểm tra quyền theo rule
   const allowed = codes.some((c) => rule.allowed.includes(c as RoleCode));
   if (!allowed) {
     const home = new URL('/', req.url);
     home.searchParams.set('denied', '1');
     home.searchParams.set('reason', codes.length ? 'not-allowed' : 'no-roles');
-    return NextResponse.redirect(home);
+
+    const redirect = NextResponse.redirect(home);
+    redirect.cookies.setAll(res.cookies.getAll());
+    return redirect;
   }
 
-  // Hợp lệ → cho qua
   return res;
 }
 
