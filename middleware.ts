@@ -1,7 +1,7 @@
 // middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
+import { createClient as createSbClient, type SupabaseClient } from '@supabase/supabase-js';
 
 type RoleCode =
   | 'admin'
@@ -53,8 +53,46 @@ function readRolesFromSessionMeta(session: any): string[] {
   return unique(codes).filter(Boolean);
 }
 
+/* ----------------- Supabase client cho middleware (tự viết) ----------------- */
+
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+/**
+ * Thay thế createMiddlewareClient của auth-helpers
+ * → đọc access token từ cookie 'sb-access-token'
+ */
+function createMiddlewareClient(opts: {
+  req: NextRequest;
+  res: NextResponse; // giữ tham số cho tương thích, hiện chưa dùng
+}): SupabaseClient {
+  const accessToken = opts.req.cookies.get('sb-access-token')?.value ?? '';
+
+  return createSbClient(
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        headers: {
+          Authorization: accessToken ? `Bearer ${accessToken}` : '',
+        },
+      },
+    }
+  );
+}
+
+/* --------------------------- Lấy role từ DB/meta --------------------------- */
+
 async function getRoleCodes(
-  supabase: ReturnType<typeof createMiddlewareClient>,
+  supabase: SupabaseClient,
   session: any
 ): Promise<string[]> {
   // 0) Fallback siêu nhanh từ session metadata (nếu có)
@@ -92,6 +130,8 @@ async function getRoleCodes(
   }
 }
 
+/* -------------------------------- Middleware -------------------------------- */
+
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
@@ -119,7 +159,7 @@ export async function middleware(req: NextRequest) {
   const rule = ACCESS.find((r) => matches(pathname, r.prefix));
   if (!rule) return NextResponse.next();
 
-  // Tạo response "gốc" để Supabase có thể refresh cookie
+  // Tạo response "gốc" (trước đây dùng để Supabase refresh cookie, giờ chỉ giữ cho tương thích)
   const res = NextResponse.next();
   const supabase = createMiddlewareClient({ req, res });
 
@@ -132,11 +172,8 @@ export async function middleware(req: NextRequest) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('next', pathname + (search || ''));
 
-    // chuyển tiếp Set-Cookie từ `res` của Supabase
-    const redirect = NextResponse.redirect(loginUrl);
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie) redirect.headers.set('set-cookie', setCookie);
-    return redirect;
+    // Trước đây copy set-cookie từ res (auth-helpers). Giờ không refresh nên bỏ qua bước này:
+    return NextResponse.redirect(loginUrl);
   }
 
   // Lấy các role code của user hiện tại (meta → RPC → DB)
@@ -151,15 +188,10 @@ export async function middleware(req: NextRequest) {
     const home = new URL('/', req.url);
     home.searchParams.set('denied', '1');
     home.searchParams.set('reason', codes.length ? 'not-allowed' : 'no-roles');
-
-    // chuyển tiếp Set-Cookie từ Supabase
-    const redirect = NextResponse.redirect(home);
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie) redirect.headers.set('set-cookie', setCookie);
-    return redirect;
+    return NextResponse.redirect(home);
   }
 
-  // Hợp lệ → cho qua và giữ cookie state
+  // Hợp lệ → cho qua
   return res;
 }
 
