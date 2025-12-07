@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getSupabase } from '@/lib/supabase-browser';
@@ -46,28 +46,35 @@ export default function LoginPage() {
   // Nếu đã có session -> đi thẳng tới next (tránh kẹt /login)
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then((res) => {
       if (!mounted) return;
-      if (data?.session) router.replace(nextUrl);
+      if (res.data?.session) router.replace(nextUrl);
     });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [supabase, router, nextUrl]);
 
   // QUAN TRỌNG: đồng bộ cookie cho SSR/middleware ngay khi trạng thái auth đổi
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
       router.refresh();
     });
     return () => subscription.unsubscribe();
   }, [supabase, router]);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErr(null);
     setNotice(null);
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password: pw,
+      });
       if (error) throw error;
       router.replace(nextUrl);
     } catch (e: any) {
@@ -80,14 +87,22 @@ export default function LoginPage() {
   async function onForgot() {
     setErr(null);
     setNotice(null);
-    if (!email) { setErr('Nhập email để nhận liên kết đặt lại mật khẩu.'); return; }
+    if (!email) {
+      setErr('Nhập email để nhận liên kết đặt lại mật khẩu.');
+      return;
+    }
     try {
       setLoading(true);
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const origin =
+        typeof window !== 'undefined' ? window.location.origin : '';
       const redirectTo = `${origin}/auth/update-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
       if (error) throw error;
-      setNotice('Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư của bạn.');
+      setNotice(
+        'Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư của bạn.'
+      );
     } catch (e: any) {
       setErr(e?.message ?? 'Không thể gửi email đặt lại mật khẩu');
     } finally {
@@ -100,9 +115,12 @@ export default function LoginPage() {
       {/* Left visual */}
       <div className="hidden md:flex items-center justify-center p-10 bg-gradient-to-br from-brand-700 to-brand-600 text-white">
         <div className="max-w-md">
-          <div className="text-3xl font-semibold">Chào mừng đến CBME Atlas</div>
+          <div className="text-3xl font-semibold">
+            Chào mừng đến CBME Atlas
+          </div>
           <p className="mt-3 text-white/80">
-            Đăng nhập để quản lý chương trình, khảo sát chất lượng, và theo dõi kết quả theo thời gian thực.
+            Đăng nhập để quản lý chương trình, khảo sát chất lượng, và theo dõi
+            kết quả theo thời gian thực.
           </p>
           <ul className="mt-6 space-y-2 text-sm text-white/80">
             <li>• Single workspace cho giảng viên &amp; QA</li>
@@ -116,9 +134,13 @@ export default function LoginPage() {
       <div className="flex items-center justify-center p-6">
         <div className="w-full max-w-md">
           <div className="mb-8">
-            <div className="h-12 w-12 grid place-items-center rounded-2xl bg-brand-600 text-white">AT</div>
+            <div className="h-12 w-12 grid place-items-center rounded-2xl bg-brand-600 text-white">
+              AT
+            </div>
             <h1 className="mt-4 text-2xl font-semibold">Đăng nhập</h1>
-            <p className="text-sm text-slate-600">Sử dụng tài khoản được cấp bởi Quản trị hệ thống.</p>
+            <p className="text-sm text-slate-600">
+              Sử dụng tài khoản được cấp bởi Quản trị hệ thống.
+            </p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-4">
@@ -160,7 +182,11 @@ export default function LoginPage() {
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-500 hover:bg-brand-50"
                   aria-label={showPw ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                 >
-                  {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  {showPw ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
                 </button>
               </div>
             </div>
