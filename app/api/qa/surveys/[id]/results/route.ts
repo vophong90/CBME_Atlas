@@ -25,7 +25,7 @@ export async function GET(
   const { id } = await ctx.params;           // 👈 lấy id
   const surveyId = id;
 
-  const sb = createServerClient(); // RLS theo user hiện tại
+  const sb = await createServerClient(); // RLS theo user hiện tại
 
   // 1) Survey
   const surveyRes = await sb
