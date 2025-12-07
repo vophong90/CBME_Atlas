@@ -95,13 +95,16 @@ export default function StudentRubricsPage() {
           return;
         }
         if (mssv) {
-          const { data, error } = await supabase
+          const { data, error } = await (supabase as any)
             .from('students')
             .select('id')
             .eq('mssv', mssv)
             .maybeSingle();
+
           if (error) throw error;
-          setStudentRowId(data?.id ?? null);
+
+          const row = (data ?? null) as { id: string } | null;
+          setStudentRowId(row?.id ?? null);
         } else {
           setStudentRowId(null);
         }
@@ -123,7 +126,7 @@ export default function StudentRubricsPage() {
       setErrorMsg(null);
       try {
         // Lấy tất cả observation đã chấm (loại bỏ draft)
-        const { data: obs, error: eObs } = await supabase
+        const { data: obs, error: eObs } = await (supabase as any)
           .from('observations')
           .select(
             'id, student_id, course_id, rubric_id, rater_id, observed_at, note, artifact_url, pdf_url, kind'
@@ -141,26 +144,26 @@ export default function StudentRubricsPage() {
         const rubricIds = Array.from(new Set(observations.map((o) => o.rubric_id).filter(Boolean)));
 
         if (courseIds.length > 0) {
-          const { data: cData, error: eC } = await supabase
+          const { data: cData, error: eC } = await (supabase as any)
             .from('courses')
             .select('id, course_code, course_name')
             .in('id', courseIds);
           if (eC) throw eC;
           const cmap: Record<string, Course> = {};
-          (cData || []).forEach((c: any) => (cmap[c.id] = c));
+          (cData || []).forEach((c: any) => (cmap[c.id] = c as Course));
           setCourseMap(cmap);
         } else {
           setCourseMap({});
         }
 
         if (rubricIds.length > 0) {
-          const { data: rData, error: eR } = await supabase
+          const { data: rData, error: eR } = await (supabase as any)
             .from('rubrics')
             .select('id, title, threshold, definition')
             .in('id', rubricIds);
           if (eR) throw eR;
           const rmap: Record<string, Rubric> = {};
-          (rData || []).forEach((r: any) => (rmap[r.id] = r));
+          (rData || []).forEach((r: any) => (rmap[r.id] = r as Rubric));
           setRubricMap(rmap);
         } else {
           setRubricMap({});
@@ -185,13 +188,13 @@ export default function StudentRubricsPage() {
       setErrorMsg(null);
       try {
         const [{ data: items, error: e1 }, { data: aggs, error: e2 }] = await Promise.all([
-          supabase
+          (supabase as any)
             .from('observation_item_scores')
             .select(
               'observation_id, rubric_item_id, level_rank, level_label, raw_score, item_key, selected_level, score, comment'
             )
             .eq('observation_id', selectedObsId),
-          supabase
+          (supabase as any)
             .from('observation_clo_results')
             .select('observation_id, clo_id, derived_level_rank, derived_level_label')
             .eq('observation_id', selectedObsId),
@@ -502,14 +505,24 @@ export default function StudentRubricsPage() {
               <div className="text-xs font-semibold text-slate-700">Tệp đính kèm</div>
               <div className="mt-2 flex flex-col gap-2 text-sm">
                 {selectedObs.artifact_url ? (
-                  <a className="text-brand-700 hover:underline" href={selectedObs.artifact_url} target="_blank" rel="noreferrer">
+                  <a
+                    className="text-brand-700 hover:underline"
+                    href={selectedObs.artifact_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     Artifact minh chứng
                   </a>
                 ) : (
                   <span className="text-slate-400">Không có artifact</span>
                 )}
                 {selectedObs.pdf_url ? (
-                  <a className="text-brand-700 hover:underline" href={selectedObs.pdf_url} target="_blank" rel="noreferrer">
+                  <a
+                    className="text-brand-700 hover:underline"
+                    href={selectedObs.pdf_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     Bản PDF kết quả
                   </a>
                 ) : (
