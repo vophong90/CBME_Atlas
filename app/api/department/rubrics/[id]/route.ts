@@ -5,9 +5,13 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabaseServer';
 
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }   // 👈 đổi kiểu params
+) {
   try {
-    const id = ctx.params.id;
+    const { id } = await ctx.params;         // 👈 nhớ await
+
     const db = createServiceClient(); // service-role, bypass RLS
 
     const { data, error } = await db
@@ -26,6 +30,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
 
     return NextResponse.json({ data });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Server error' }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? 'Server error' },
+      { status: 500 }
+    );
   }
 }
