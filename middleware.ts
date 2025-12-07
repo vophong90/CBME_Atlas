@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
+/* ================== Kiểu role & cấu hình route ================== */
+
 type RoleCode =
   | 'admin'
   | 'edu_manager'
@@ -21,10 +23,13 @@ const ACCESS: Array<{ prefix: string; allowed: RoleCode[] }> = [
   { prefix: '/department',        allowed: ['admin', 'dept_secretary', 'dept_lead'] },
   { prefix: '/teacher',           allowed: ['admin', 'lecturer'] },
   { prefix: '/student',           allowed: ['admin', 'student'] },
+  // /360-eval mở hoàn toàn → không đưa vào ACCESS
 ];
 
-// Public routes
+// Các đường dẫn public (không yêu cầu đăng nhập)
 const PUBLIC_PATHS = new Set<string>(['/', '/login', '/error', '/360-eval']);
+
+/* ================== Helper chung ================== */
 
 function matches(path: string, prefix: string) {
   return path === prefix || path.startsWith(prefix + '/');
@@ -58,11 +63,15 @@ async function getRoleCodes(supabase: any, session: any): Promise<string[]> {
   const metaCodes = readRolesFromSessionMeta(session);
   if (metaCodes.length) return metaCodes;
 
+  // 1) Thử RPC: public.fn_my_role_codes() → text[]
   try {
     const { data, error } = await supabase.rpc('fn_my_role_codes');
     if (!error && Array.isArray(data)) return data as string[];
-  } catch {}
+  } catch {
+    // ignore
+  }
 
+  // 2) Fallback: user_roles → roles
   try {
     const { data: urs, error: e1 } = await supabase
       .from('user_roles')
@@ -78,17 +87,44 @@ async function getRoleCodes(supabase: any, session: any): Promise<string[]> {
       .in('id', roleIds);
     if (e2 || !roles?.length) return metaCodes;
 
-    const dbCodes = roles.map((r: any) => r.code);
-    return unique([...metaCodes, ...dbCodes]);
+    const dbCodes = roles.map((r: any) => r.code as string).filter(Boolean);
+    return unique([...(metaCodes ?? []), ...dbCodes]);
   } catch {
     return metaCodes ?? [];
   }
 }
 
+/* ================== Tạo Supabase client cho middleware ================== */
+
+function createMiddlewareSupabase(req: NextRequest, res: NextResponse) {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        // Lấy cookie
+        get(name: string) {
+          return req.cookies.get(name)?.value;
+        },
+        // Ghi / cập nhật cookie
+        set(name: string, value: string, options: CookieOptions) {
+          res.cookies.set({ name, value, ...options });
+        },
+        // Xoá cookie
+        remove(name: string, options: CookieOptions) {
+          res.cookies.set({ name, value: '', ...options });
+        },
+      },
+    }
+  );
+}
+
+/* ================== Middleware chính ================== */
+
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Static and API skip
+  // Bỏ qua static & API
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/assets') ||
@@ -98,83 +134,53 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Public 360-eval
+  // /360-eval (và route con) là public
   if (pathname === '/360-eval' || pathname.startsWith('/360-eval/')) {
     return NextResponse.next();
   }
 
-  // Other public paths
+  // Trang public khác
   if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next();
   }
 
-  // Check access rules
+  // Xem route này có rule không
   const rule = ACCESS.find((r) => matches(pathname, r.prefix));
   if (!rule) return NextResponse.next();
 
-  // Create base response for Supabase cookie injection
-  let res = NextResponse.next({ request: req });
+  // Response gốc để Supabase có thể ghi cookie
+  const res = NextResponse.next();
+  const supabase = createMiddlewareSupabase(req, res);
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return req.cookies.getAll();
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          res.cookies.set(name, value, options);
-        },
-      },
-    }
-  );
-
-  // Load session
+  // Bắt buộc phải đăng nhập
   const {
     data: { session },
   } = await supabase.auth.getSession();
 
-  // Not logged in → redirect to login
   if (!session) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('next', pathname + (search || ''));
-
-    const redirect = NextResponse.redirect(loginUrl);
-
-    // Copy cookies from res → redirect (manual loop)
-    for (const c of res.cookies.getAll()) {
-      redirect.cookies.set(c.name, c.value, c);
-    }
-
-    return redirect;
+    return NextResponse.redirect(loginUrl);
   }
 
-  // Fetch user roles
+  // Lấy các role code của user
   const codes = await getRoleCodes(supabase, session);
 
-  // Admin bypass
+  // admin → pass hết
   if (codes.includes('admin')) {
     return res;
   }
 
-  // Check allowed roles
+  // Kiểm tra quyền theo rule
   const allowed = codes.some((c) => rule.allowed.includes(c as RoleCode));
   if (!allowed) {
     const home = new URL('/', req.url);
     home.searchParams.set('denied', '1');
     home.searchParams.set('reason', codes.length ? 'not-allowed' : 'no-roles');
-
-    const redirect = NextResponse.redirect(home);
-
-    // Copy cookies
-    for (const c of res.cookies.getAll()) {
-      redirect.cookies.set(c.name, c.value, c);
-    }
-
-    return redirect;
+    return NextResponse.redirect(home);
   }
 
+  // OK → cho qua
   return res;
 }
 
