@@ -18,8 +18,13 @@ type AnswerRow = {
   free_text: string | null;
 };
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const surveyId = params.id;
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }   // 👈 params là Promise
+) {
+  const { id } = await ctx.params;           // 👈 lấy id
+  const surveyId = id;
+
   const sb = createServerClient(); // RLS theo user hiện tại
 
   // 1) Survey
@@ -76,10 +81,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   type Agg = { total: number; choices: Map<string, number>; texts: string[] };
 
   const byQ = new Map<string, Agg>();
-  for (const q of questions) byQ.set(q.id, { total: 0, choices: new Map(), texts: [] });
+  for (const q of questions)
+    byQ.set(q.id, { total: 0, choices: new Map(), texts: [] });
 
   for (const a of answers) {
-    const agg = byQ.get(a.question_id) ?? { total: 0, choices: new Map<string, number>(), texts: [] };
+    const agg =
+      byQ.get(a.question_id) ??
+      { total: 0, choices: new Map<string, number>(), texts: [] };
     // mỗi bản ghi answer (option hoặc free_text) tính là 1 lần trả lời cho câu đó
     agg.total += 1;
     if (a.option != null && a.option !== '') {
@@ -106,7 +114,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     }
     const total = Math.max(item.total, 1);
 
-    // 👇 Quan trọng: gõ kiểu cho entries để tránh lỗi TS "unknown"
     const entries = Array.from<[string, number]>(item.choices.entries());
     const choices = entries.map(([value, count]) => ({
       value,
