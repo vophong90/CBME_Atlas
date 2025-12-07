@@ -1,13 +1,38 @@
-import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+// app/api/observations/route.ts
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 // import type { Database } from '@/types/supabase'; // nếu bạn có types, bỏ comment và <Database> bên dưới
 
 export async function POST(req: Request) {
   try {
-    const supabase = createRouteHandlerClient/*<Database>*/({ cookies });
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 });
+    // Lấy cookieStore từ Next (Next 15: cookies() gõ là Promise → dùng await)
+    const cookieStore = await cookies();
+
+    const supabase = createServerClient/*<Database>*/(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get: (name: string) => cookieStore.get(name)?.value,
+          set: (name: string, value: string, options: any) => {
+            cookieStore.set({ name, value, ...options });
+          },
+          remove: (name: string, options: any) => {
+            cookieStore.set({ name, value: "", ...options });
+          },
+        },
+      }
+    );
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user)
+      return NextResponse.json(
+        { ok: false, message: "Unauthorized" },
+        { status: 401 }
+      );
 
     const body = await req.json();
     const { student_code, course_code, rubric_title, items } = body as {
@@ -16,36 +41,58 @@ export async function POST(req: Request) {
       rubric_title: string;
       items: Array<{ code: string; level_rank: number }>;
     };
-    if (!student_code || !course_code || !rubric_title || !Array.isArray(items) || items.length === 0) {
-      return NextResponse.json({ ok: false, message: 'Thiếu tham số' }, { status: 400 });
+
+    if (
+      !student_code ||
+      !course_code ||
+      !rubric_title ||
+      !Array.isArray(items) ||
+      items.length === 0
+    ) {
+      return NextResponse.json(
+        { ok: false, message: "Thiếu tham số" },
+        { status: 400 }
+      );
     }
 
     // Lookups theo schema bạn đã dán
     const { data: stu, error: eStu } = await supabase
-      .from('students')
-      .select('id')
-      .eq('student_code', student_code)
+      .from("students")
+      .select("id")
+      .eq("student_code", student_code)
       .single();
-    if (eStu || !stu) return NextResponse.json({ ok: false, message: 'Không tìm thấy sinh viên' }, { status: 400 });
+    if (eStu || !stu)
+      return NextResponse.json(
+        { ok: false, message: "Không tìm thấy sinh viên" },
+        { status: 400 }
+      );
 
     const { data: course, error: eCourse } = await supabase
-      .from('courses')
-      .select('id')
-      .eq('course_code', course_code) // đúng cột
+      .from("courses")
+      .select("id")
+      .eq("course_code", course_code)
       .single();
-    if (eCourse || !course) return NextResponse.json({ ok: false, message: 'Không tìm thấy học phần' }, { status: 400 });
+    if (eCourse || !course)
+      return NextResponse.json(
+        { ok: false, message: "Không tìm thấy học phần" },
+        { status: 400 }
+      );
 
     const { data: rubric, error: eRub } = await supabase
-      .from('rubrics')
-      .select('id')
-      .eq('course_code', course_code)
-      .eq('title', rubric_title) // đúng cột
+      .from("rubrics")
+      .select("id")
+      .eq("course_code", course_code)
+      .eq("title", rubric_title)
       .single();
-    if (eRub || !rubric) return NextResponse.json({ ok: false, message: 'Không tìm thấy rubric' }, { status: 400 });
+    if (eRub || !rubric)
+      return NextResponse.json(
+        { ok: false, message: "Không tìm thấy rubric" },
+        { status: 400 }
+      );
 
     // Tạo Observation: CHỐT kind='teacher' và rater_id=user.id
     const { data: obs, error: eObs } = await supabase
-      .from('observations')
+      .from("observations")
       .insert({
         student_id: stu.id,
         course_id: course.id,
@@ -53,50 +100,75 @@ export async function POST(req: Request) {
         rater_id: user.id,
         observed_at: new Date().toISOString(),
         consent: false,
-        kind: 'teacher',
+        kind: "teacher",
       })
       .select()
       .single();
     if (eObs || !obs) {
-      return NextResponse.json({ ok: false, message: eObs?.message || 'Không tạo được observation' }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, message: eObs?.message || "Không tạo được observation" },
+        { status: 400 }
+      );
     }
 
-    // Lấy rubric items theo rubric_id (nếu bảng tồn tại)
+    // Lấy rubric items theo rubric_id
     const { data: ritems, error: eItems } = await supabase
-      .from('rubric_items')
-      .select('id, code')
-      .eq('rubric_id', rubric.id);
+      .from("rubric_items")
+      .select("id, code")
+      .eq("rubric_id", rubric.id);
     if (eItems) {
-      return NextResponse.json({ ok: false, message: eItems.message }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, message: eItems.message },
+        { status: 400 }
+      );
     }
-    const code2id = new Map((ritems || []).map((r: any) => [r.code, r.id]));
+    const code2id = new Map(
+      (ritems || []).map((r: any) => [r.code, r.id] as const)
+    );
 
     // Dựng payload điểm
-    const scoresPayload = items.map(it => {
+    const scoresPayload = items.map((it) => {
       const rid = code2id.get(it.code);
-      if (!rid) throw new Error(`Rubric item code không hợp lệ: ${it.code}`);
+      if (!rid)
+        throw new Error(`Rubric item code không hợp lệ: ${it.code}`);
       return {
         observation_id: obs.id,
         rubric_item_id: rid,
         level_rank: it.level_rank,
-        level_label: it.level_rank === 2 ? 'Khá' : it.level_rank === 1 ? 'Đạt' : 'Không đạt',
+        level_label:
+          it.level_rank === 2
+            ? "Khá"
+            : it.level_rank === 1
+            ? "Đạt"
+            : "Không đạt",
       };
     });
 
-    const { error: eScores } = await supabase.from('observation_item_scores').insert(scoresPayload);
+    const { error: eScores } = await supabase
+      .from("observation_item_scores")
+      .insert(scoresPayload);
     if (eScores) {
-      return NextResponse.json({ ok: false, message: eScores.message }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, message: eScores.message },
+        { status: 400 }
+      );
     }
 
     // Gọi RPC tính CLO (nếu đã có)
-    const { error: eRpc } = await supabase.rpc('compute_observation_clo_results', { p_observation_id: obs.id });
+    const { error: eRpc } = await supabase.rpc(
+      "compute_observation_clo_results",
+      { p_observation_id: obs.id }
+    );
     if (eRpc) {
-      // Không chặn flow chính; trả warning nếu muốn:
+      // Không chặn flow chính; nếu muốn có thể trả thêm warn
       // return NextResponse.json({ ok: true, id: obs.id, warn: `RPC failed: ${eRpc.message}` });
     }
 
     return NextResponse.json({ ok: true, id: obs.id });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: String(err?.message || err) },
+      { status: 500 }
+    );
   }
 }
