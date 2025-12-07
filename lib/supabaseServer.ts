@@ -3,6 +3,7 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import { createClient as createSbClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 /* ----------------------------- ENV helpers ------------------------------ */
 function requireEnv(name: string): string {
@@ -32,41 +33,44 @@ export const supabaseAdmin: SupabaseClient | undefined = (() => {
 
 /* ----------------------- Server clients (RLS, có session) ------------------- */
 /**
- * Route Handler client (app/api/...)
- * & Server Components / Actions
- * → Đều đọc access_token từ cookie 'sb-access-token'
+ * Client dùng cho Server Components / Route Handlers.
+ * Đọc & ghi cookie bằng @supabase/ssr → server & client share cùng session.
  */
-async function createRlsClientFromCookies(): Promise<SupabaseClient> {
-  const cookieStore = await cookies(); // Next 15: cookies() là async
-  const accessToken = cookieStore.get('sb-access-token')?.value ?? '';
+function _getServerSupabase(): SupabaseClient {
+  const cookieStore = cookies();
 
-  return createSbClient(
+  return createServerClient(
     requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
     requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
     {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-      global: {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          // Trong Server Component có thể không cho set cookie, nên bọc try/catch
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options as CookieOptions);
+            });
+          } catch {
+            // bỏ qua, vì phần refresh session có thể do proxy / middleware xử lý
+          }
         },
       },
     }
   );
 }
 
-/** Dùng trong Route Handlers (app/api/...) */
-export async function getSupabaseFromRequest(): Promise<SupabaseClient> {
-  return createRlsClientFromCookies();
+/** Dùng trong Route Handlers: app/api/... */
+export function getSupabaseFromRequest(): SupabaseClient {
+  return _getServerSupabase();
 }
 
 /** Dùng trong Server Components / Server Actions */
-export async function getSupabase(): Promise<SupabaseClient> {
-  return createRlsClientFromCookies();
+export function getSupabase(): SupabaseClient {
+  return _getServerSupabase();
 }
 
 /** Alias tương thích code cũ */
-export const createServerClient = getSupabase;
+export const createServerClient = _getServerSupabase;
