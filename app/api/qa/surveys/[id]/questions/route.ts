@@ -56,7 +56,7 @@ export async function PATCH(
   }
 
   const { create, update, remove } = parsed.data;
-  const sb = createServerClient();
+  const sb = await createServerClient();
 
   // 1) Inserts
   if (create.length) {
